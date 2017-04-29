@@ -1,17 +1,36 @@
 extern crate zim;
+extern crate clap;
 
+use clap::{Arg, App};
 use zim::{Zim, DirectoryEntry, Target};
 use std::fs::File;
 use std::io::Write;
 use std::collections::HashMap;
 use std::path::Path;
 
-
 fn main() {
+    let matches = App::new("zimextractor")
+        .version("0.1")
+        .about("Extract zim files")
+        .arg(Arg::with_name("out")
+             .short("o")
+             .long("out")
+             .help("Output directory")
+             .takes_value(true))
+        .arg(Arg::with_name("INPUT")
+             .help("Set the zim file to extract")
+             .required(true)
+             .index(1))
+        .get_matches();
 
-
-    let zim = Zim::new("wikispecies_en_all_2015-11.zim").ok().unwrap();
-    let root_output = Path::new("zim_output_3");
+    let out = matches.value_of("out").unwrap_or("out");
+    let root_output = Path::new(out);
+    
+    let input = matches.value_of("INPUT").unwrap();
+    
+    println!("Extracting file: {} to {}", input, out);
+    
+    let zim = Zim::new(input).ok().unwrap();
 
     // map between cluster and directory entry
     let mut cluster_map = HashMap::new();
@@ -29,8 +48,6 @@ fn main() {
     }
     println!("Done!");
 
-
-    
     // extract all non redirect entries
     let mut c = 0;
     for (cid, entries) in cluster_map {
@@ -80,5 +97,4 @@ fn main() {
         let page = zim.get_by_url_index(main_page_idx).unwrap();
         println!("Main page is {}", page.url);
     }
-
 }
