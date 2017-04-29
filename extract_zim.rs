@@ -39,13 +39,10 @@ fn main() {
 
     for i in zim.iterate_by_urls() {
         if let Some(Target::Cluster(cid, _)) = i.target {
-
             cluster_map.entry(cid).or_insert(Vec::new()).push(i);
         }
-        //println!("{:?}", i);
-        //if c > 10 { break; }
-        //c += 1;
     }
+    
     println!("Done!");
 
     // extract all non redirect entries
@@ -69,7 +66,7 @@ fn main() {
             }
         }
         c += 1;
-        println!("Finished processing cluster {} of {} ({}%)", c, zim.cluster_count, c * 100 / zim.cluster_count);
+        println!("Finished processing cluster {} of {} ({}%)", c, zim.header.cluster_count, c * 100 / zim.header.cluster_count);
     }
 
     // link all redirects
@@ -93,7 +90,7 @@ fn main() {
         }
     }
 
-    if let Some(main_page_idx) = zim.main_page_idx {
+    if let Some(main_page_idx) = zim.header.main_page {
         let page = zim.get_by_url_index(main_page_idx).unwrap();
         println!("Main page is {}", page.url);
     }
