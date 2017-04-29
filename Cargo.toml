@@ -14,3 +14,7 @@ pbr = "1.0"
 [[bin]]
 name = "extract_zim"
 path = "extract_zim.rs"
+
+[[bin]]
+name = "ipfs_link"
+path ="ipfs_link.rs"
