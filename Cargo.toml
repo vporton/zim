@@ -8,6 +8,8 @@ byteorder = "0.4.2"
 memmap = "0.2.3"
 xz-decom = "0.2"
 clap = "2.23"
+stopwatch = "0.0.7"
+pbr = "1.0"
 
 [[bin]]
 name = "extract_zim"

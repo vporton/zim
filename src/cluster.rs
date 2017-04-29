@@ -42,7 +42,7 @@ impl Cluster {
         let mut blob_list = Vec::new();
         let data: Vec<u8> = if comp_type == 4 {
             let data = try!(decompress(&slice[1..total_cluster_size]));
-            println!("Decompressed {} bytes of data", data.len());
+            // println!("Decompressed {} bytes of data", data.len());
             data
         } else {
             Vec::from(&slice[1..total_cluster_size])
