@@ -16,7 +16,6 @@ use memmap::{Mmap, MmapView};
 use xz_decom::{decompress, XZError};
 
 use std::fs::File;
-use std::io::Read;
 use std::io::BufRead;
 use std::path::Path;
 use std::error::Error;
@@ -112,7 +111,6 @@ impl Cluster {
 
         let cluster_view = {
             let mut view = unsafe{ zim.master_view.clone() };
-            let len = view.len();
             view.restrict(this_cluster_off as usize, total_cluster_size);
             view
         };
@@ -148,10 +146,16 @@ impl Cluster {
         })
         
     }
+    
     pub fn get_blob(&self, idx: u32) -> &[u8] {
         let this_blob_off = self.blob_list[idx as usize] as usize;
-        let next_blob_off = self.blob_list[idx as usize + 1] as usize;
-        &self.data[this_blob_off..next_blob_off]
+        let n = idx as usize + 1;
+        if self.blob_list.len() > n {
+            let next_blob_off = self.blob_list[n] as usize;
+            &self.data[this_blob_off..next_blob_off]
+        } else {
+            &self.data[this_blob_off..]
+        }
     }
 }
 
@@ -295,7 +299,7 @@ impl Zim {
     /// Loads a Zim file and parses the header, and the url, title, and cluster offset tables.  The
     /// rest of the data isn't parsed until it's needed, so this should be fairly quick.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Zim, ParsingError> {
-        let mut f = try!(File::open(p));
+        let f = try!(File::open(p));
         let mmap = try!(Mmap::open(&f, memmap::Protection::Read));
         let master_view = mmap.into_view();
 
@@ -351,7 +355,7 @@ impl Zim {
                 v };
             let mut url_cur = Cursor::new( unsafe{ url_list_view.as_slice() });
 
-            for url_num in 0..article_count {
+            for _ in 0..article_count {
                 let pointer = try!(url_cur.read_u64::<LittleEndian>());
                 list.push(pointer);
             }
@@ -380,7 +384,7 @@ impl Zim {
                 v };
             let mut cluster_cur = Cursor::new( unsafe{ cluster_list_view.as_slice() });
 
-            for cluster_num in 0..cluster_count {
+            for _ in 0..cluster_count {
                 let pointer = try!(cluster_cur.read_u64::<LittleEndian>());
                 list.push(pointer);
             }

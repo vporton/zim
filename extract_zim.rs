@@ -2,7 +2,7 @@ extern crate zim;
 extern crate clap;
 
 use clap::{Arg, App};
-use zim::{Zim, DirectoryEntry, Target};
+use zim::{Zim, Target};
 use std::fs::File;
 use std::io::Write;
 use std::collections::HashMap;
