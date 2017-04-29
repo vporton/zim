@@ -17,14 +17,13 @@ pub struct Cluster {
     comp_type: u8,
     blob_list: Vec<u32>, // offsets into data
     data: Vec<u8>,
-    
 }
 
 impl Cluster {
     pub fn new(zim: &Zim, idx: u32) -> Result<Cluster, ParsingError> {
         let idx = idx as usize;
         let this_cluster_off = zim.cluster_list[idx];
-        let next_cluster_off = if idx < zim.cluster_list.len()-1 {
+        let next_cluster_off = if idx < zim.cluster_list.len() - 1 {
             zim.cluster_list[idx + 1]
         } else {
             zim.header.checksum_pos
@@ -34,13 +33,13 @@ impl Cluster {
         let total_cluster_size: usize = (next_cluster_off - this_cluster_off) as usize;
 
         let cluster_view = {
-            let mut view = unsafe{ zim.master_view.clone() };
+            let mut view = unsafe { zim.master_view.clone() };
             view.restrict(this_cluster_off as usize, total_cluster_size);
             view
         };
-        let slice = unsafe{ cluster_view.as_slice() };
+        let slice = unsafe { cluster_view.as_slice() };
         let comp_type = slice[0];
-        let mut blob_list = Vec::new(); 
+        let mut blob_list = Vec::new();
         let data: Vec<u8> = if comp_type == 4 {
             let data = try!(decompress(&slice[1..total_cluster_size]));
             println!("Decompressed {} bytes of data", data.len());
@@ -62,15 +61,15 @@ impl Cluster {
         }
 
         Ok(Cluster {
-            comp_type: comp_type,
-            start_off: this_cluster_off,
-            end_off: next_cluster_off,
-            data: data,
-            blob_list: blob_list,
-        })
-        
+               comp_type: comp_type,
+               start_off: this_cluster_off,
+               end_off: next_cluster_off,
+               data: data,
+               blob_list: blob_list,
+           })
+
     }
-    
+
     pub fn get_blob(&self, idx: u32) -> &[u8] {
         let this_blob_off = self.blob_list[idx as usize] as usize;
         let n = idx as usize + 1;

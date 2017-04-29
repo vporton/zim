@@ -4,6 +4,5 @@ pub enum MimeType {
     Redirect,
     LinkTarget,
     DeletedEntry,
-    Type(String)
+    Type(String),
 }
-

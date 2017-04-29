@@ -13,23 +13,23 @@ fn main() {
         .version("0.1")
         .about("Extract zim files")
         .arg(Arg::with_name("out")
-             .short("o")
-             .long("out")
-             .help("Output directory")
-             .takes_value(true))
+                 .short("o")
+                 .long("out")
+                 .help("Output directory")
+                 .takes_value(true))
         .arg(Arg::with_name("INPUT")
-             .help("Set the zim file to extract")
-             .required(true)
-             .index(1))
+                 .help("Set the zim file to extract")
+                 .required(true)
+                 .index(1))
         .get_matches();
 
     let out = matches.value_of("out").unwrap_or("out");
     let root_output = Path::new(out);
-    
+
     let input = matches.value_of("INPUT").unwrap();
-    
+
     println!("Extracting file: {} to {}", input, out);
-    
+
     let zim = Zim::new(input).ok().unwrap();
 
     // map between cluster and directory entry
@@ -42,7 +42,7 @@ fn main() {
             cluster_map.entry(cid).or_insert(Vec::new()).push(i);
         }
     }
-    
+
     println!("Done!");
 
     // extract all non redirect entries
@@ -66,7 +66,10 @@ fn main() {
             }
         }
         c += 1;
-        println!("Finished processing cluster {} of {} ({}%)", c, zim.header.cluster_count, c * 100 / zim.header.cluster_count);
+        println!("Finished processing cluster {} of {} ({}%)",
+                 c,
+                 zim.header.cluster_count,
+                 c * 100 / zim.header.cluster_count);
     }
 
     // link all redirects
@@ -82,7 +85,7 @@ fn main() {
             let mut d = String::new();
             d.push(entry.namespace);
             let dst = root_output.join(&s).join(&entry.url);
-            
+
             if !dst.exists() {
                 println!("{:?} -> {:?}", src, dst);
                 std::fs::hard_link(src, dst).unwrap();
