@@ -76,7 +76,7 @@ impl Cluster {
             loop {
                 let offset = cur.read_u32::<LittleEndian>()
                     .ok()
-                    .expect("failed to read blob-list");
+                    .expect("failed to read blob_list");
                 blob_list.push(offset);
                 if offset as usize >= datalen {
                     //println!("at end");
@@ -89,24 +89,21 @@ impl Cluster {
 
     pub fn get_blob(&mut self, idx: u32) -> &[u8] {
         // delay decompression until needed
-        match self.blob_list {
-            None => self.decompress(),
-            _ => {}
+        if self.blob_list.is_none() {
+            self.decompress();
         }
 
-        match self.blob_list {
-            Some(ref list) => {
-
-                let this_blob_off = list[idx as usize] as usize;
-                let n = idx as usize + 1;
-                if list.len() > n {
-                    let next_blob_off = list[n] as usize;
-                    &self.data[this_blob_off..next_blob_off]
-                } else {
-                    &self.data[this_blob_off..]
-                }
+        if let Some(ref list) = self.blob_list {
+            let this_blob_off = list[idx as usize] as usize;
+            let n = idx as usize + 1;
+            if list.len() > n {
+                let next_blob_off = list[n] as usize;
+                &self.data[this_blob_off..next_blob_off]
+            } else {
+                &self.data[this_blob_off..]
             }
-            _ => panic!("no blob_list found"),
+        } else {
+            panic!("no blob_list found")
         }
     }
 }

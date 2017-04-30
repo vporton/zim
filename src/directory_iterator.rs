@@ -1,4 +1,3 @@
-
 use std;
 use directory_entry::DirectoryEntry;
 
@@ -22,25 +21,24 @@ impl<'a> DirectoryIterator<'a> {
 
 impl<'a> std::iter::Iterator for DirectoryIterator<'a> {
     type Item = DirectoryEntry;
+
     fn next(&mut self) -> Option<Self::Item> {
-        if self.article_to_yield >= self.max_articles {
-            None
-        } else {
+        if self.article_to_yield < self.max_articles {
             let dir_entry_ptr = self.zim.url_list[self.article_to_yield as usize] as usize;
             self.article_to_yield += 1;
+
             let dir_view = {
                 let mut view = unsafe { self.zim.master_view.clone() };
                 let len = view.len();
                 view.restrict(dir_entry_ptr, len - dir_entry_ptr).ok();
                 view
             };
+
             let slice = unsafe { dir_view.as_slice() };
 
-            if let Ok(entry) = DirectoryEntry::new(self.zim, slice) {
-                Some(entry)
-            } else {
-                None
-            }
+            DirectoryEntry::new(self.zim, slice).ok()
+        } else {
+            None
         }
     }
 }

@@ -68,36 +68,45 @@ impl Zim {
     /// Loads a Zim file and parses the header, and the url, title, and cluster offset tables.  The
     /// rest of the data isn't parsed until it's needed, so this should be fairly quick.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Zim, ParsingError> {
-        let f = try!(File::open(p));
-        let mmap = try!(Mmap::open(&f, memmap::Protection::Read));
+        let f = File::open(p)?;
+        let mmap = Mmap::open(&f, memmap::Protection::Read)?;
         let master_view = mmap.into_view_sync();
 
-        let header_view = {
-            let view = unsafe { master_view.clone() };
-            view
-        };
-
+        let header_view = unsafe { master_view.clone() };
         let mut header_cur = Cursor::new(unsafe { header_view.as_slice() });
-        let magic = try!(header_cur.read_u32::<LittleEndian>());
-        assert_eq!(magic, ZIM_MAGIC_NUMBER);
-        let version = try!(header_cur.read_u32::<LittleEndian>());
-        let uuid = [try!(header_cur.read_u64::<LittleEndian>()),
-                    try!(header_cur.read_u64::<LittleEndian>())];
-        let article_count = try!(header_cur.read_u32::<LittleEndian>());
-        let cluster_count = try!(header_cur.read_u32::<LittleEndian>());
-        let url_ptr_pos = try!(header_cur.read_u64::<LittleEndian>());
-        let title_ptr_pos = try!(header_cur.read_u64::<LittleEndian>());
-        let cluster_ptr_pos = try!(header_cur.read_u64::<LittleEndian>());
-        let mime_list_pos = try!(header_cur.read_u64::<LittleEndian>());
 
-        let main_page = try!(header_cur.read_u32::<LittleEndian>());
-        let layout_page = try!(header_cur.read_u32::<LittleEndian>());
-        let checksum_pos = try!(header_cur.read_u64::<LittleEndian>());
+        let magic = header_cur.read_u32::<LittleEndian>()?;
 
-        assert_eq!(header_cur.position(), 80);
+        if magic != ZIM_MAGIC_NUMBER {
+            return Err(ParsingError {
+                           msg: "Invalid magic number",
+                           cause: None,
+                       });
+        }
+
+        let version = header_cur.read_u32::<LittleEndian>()?;
+        let uuid = [header_cur.read_u64::<LittleEndian>()?,
+                    header_cur.read_u64::<LittleEndian>()?];
+        let article_count = header_cur.read_u32::<LittleEndian>()?;
+        let cluster_count = header_cur.read_u32::<LittleEndian>()?;
+        let url_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
+        let title_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
+        let cluster_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
+        let mime_list_pos = header_cur.read_u64::<LittleEndian>()?;
+
+        let main_page = header_cur.read_u32::<LittleEndian>()?;
+        let layout_page = header_cur.read_u32::<LittleEndian>()?;
+        let checksum_pos = header_cur.read_u64::<LittleEndian>()?;
+
+        if header_cur.position() != 80 {
+            return Err(ParsingError {
+                           msg: "Inconsistent header parse",
+                           cause: None,
+                       });
+        }
 
         let geo_index_pos = if mime_list_pos > 80 {
-            Some(try!(header_cur.read_u64::<LittleEndian>()))
+            Some(header_cur.read_u64::<LittleEndian>()?)
         } else {
             None
         };
@@ -113,7 +122,7 @@ impl Zim {
                         break;
                     }
                     mime_buf.truncate(size - 1);
-                    mime_table.push(try!(String::from_utf8(mime_buf)));
+                    mime_table.push(String::from_utf8(mime_buf)?);
                 }
             }
             mime_table
@@ -161,7 +170,7 @@ impl Zim {
         let cluster_list = {
             let cluster_list_view = {
                 let mut v = unsafe { master_view.clone() };
-                try!(v.restrict(cluster_ptr_pos as usize, cluster_count as usize * 8));
+                v.restrict(cluster_ptr_pos as usize, cluster_count as usize * 8)?;
                 v
             };
             let mut cluster_cur = Cursor::new(unsafe { cluster_list_view.as_slice() });
@@ -210,7 +219,7 @@ impl Zim {
                 if (id as usize) < self.mime_table.len() {
                     Some(MimeType::Type(self.mime_table[id as usize].clone()))
                 } else {
-                    println!("WARNINING unknown mimetype idx {}", id);
+                    println!("WARNING unknown mimetype idx {}", id);
                     None
                 }
             }
@@ -249,4 +258,19 @@ impl Zim {
 
 fn is_defined(val: u32) -> Option<u32> {
     if val == 0xffffffff { None } else { Some(val) }
+}
+
+#[test]
+fn test_zim() {
+    // we want to handle all URLs from the same cluster at the same time,
+    // so build a map between cluster
+    // build a mapping from
+
+    let zim = Zim::new("fixtures/wikipedia_ab_all_2017-03.zim")
+        .ok()
+        .unwrap();
+
+    assert_eq!(zim.header.version, 5);
+
+    assert_eq!(zim.iterate_by_urls().count(), 3111);
 }

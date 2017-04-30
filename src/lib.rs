@@ -20,18 +20,3 @@ mod zim;
 
 pub use target::Target;
 pub use zim::Zim;
-
-#[test]
-fn test_zim() {
-    // we want to handle all URLs from the same cluster at the same time,
-    // so build a map between cluster
-    // build a mapping from
-
-    let zim = Zim::new("fixtures/wikipedia_ab_all_2017-03.zim")
-        .ok()
-        .unwrap();
-
-    assert_eq!(zim.header.version, 5);
-
-    assert_eq!(zim.iterate_by_urls().count(), 3111);
-}
