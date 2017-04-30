@@ -1,17 +1,15 @@
 extern crate zim;
 extern crate clap;
 extern crate stopwatch;
-extern crate pbr;
+extern crate crossbeam;
 
 use clap::{Arg, App};
 use zim::{Zim, Target};
 use std::fs::File;
-use std::io::Write;
+use std::io::{Write, BufWriter};
 use std::collections::HashMap;
 use std::path::Path;
-use std::thread;
 use stopwatch::Stopwatch;
-use pbr::MultiBar;
 
 fn main() {
     let matches = App::new("zimextractor")
@@ -37,10 +35,8 @@ fn main() {
     let root_output = Path::new(out);
 
     let input = matches.value_of("INPUT").unwrap();
-    let mut mb = MultiBar::new();
 
-    mb.println(&format!("Extracting file: {} to {}:", input, out));
-    mb.println("");
+    println!("Extracting file: {} to {}\n", input, out);
 
     let sw = Stopwatch::start_new();
 
@@ -49,59 +45,43 @@ fn main() {
     // map between cluster and directory entry
     let mut cluster_map = HashMap::new();
 
-    let mut p1 = mb.create_bar(zim.header.cluster_count as u64);
-    let mut p2 = mb.create_bar(zim.header.cluster_count as u64);
-    let mut p3 = mb.create_bar(zim.header.cluster_count as u64);
-
-    thread::spawn(move || { mb.listen(); });
-
-    p1.show_message = true;
-    p1.message("Building cluster map :");
-
+    println!("  Creating cluster map");
     for i in zim.iterate_by_urls() {
         if let Some(Target::Cluster(cid, _)) = i.target {
             cluster_map.entry(cid).or_insert(Vec::new()).push(i);
         }
-        p1.inc();
     }
 
-    p1.finish_print("Created cluster map");
+    println!("  Extracting entries: {}", zim.header.cluster_count);
 
-    p2.show_message = true;
-    p2.message("Extracting entries :");
+    crossbeam::scope(|scope| for (cid, entries) in cluster_map {
+                         let mut cluster = zim.get_cluster(cid).unwrap();
 
-    // extract all non redirect entries
-    for (cid, entries) in cluster_map {
-        //println!("{}", cid);
-        //println!("{:?}", entries);
-        let cluster = zim.get_cluster(cid).unwrap();
+                         scope.spawn(move || {
+            cluster.decompress();
 
-        for entry in entries {
-            if let Some(Target::Cluster(_cid, bid)) = entry.target {
-                assert_eq!(cid, _cid);
-                let mut s = String::new();
-                s.push(entry.namespace);
-                let out_path = root_output.join(&s).join(&entry.url);
-                std::fs::create_dir_all(out_path.parent().unwrap()).unwrap();
-                let data = cluster.get_blob(bid);
-                let mut f = File::create(&out_path).unwrap();
-                f.write_all(data).unwrap();
-                // f.sync_data().unwrap();
-                // println!("{} written to {}", entry.url, out_path.display());
+            for entry in entries {
+                if let Some(Target::Cluster(_cid, bid)) = entry.target {
+                    assert_eq!(cid, _cid);
+                    let mut s = String::new();
+                    s.push(entry.namespace);
+                    let out_path = root_output.join(&s).join(&entry.url);
+                    std::fs::create_dir_all(out_path.parent().unwrap()).unwrap();
+                    let data = cluster.get_blob(bid);
+                    let f = File::create(&out_path)
+                        .ok()
+                        .expect(&format!("failed to write file {:?}", out_path));
+                    let mut writer = BufWriter::new(&f);
+                    writer.write_all(data).unwrap();
+                }
             }
-        }
-        p2.inc();
-        // println!("Finished processing cluster {} of {} ({}%)",
-        //          c,
-        //          zim.header.cluster_count,
-        //          c * 100 / zim.header.cluster_count);
-    }
+        });
+                     });
 
-    p2.finish_print(&format!("Extraction done in {}ms", sw.elapsed_ms()));
+    println!("  Extraction done in {}ms", sw.elapsed_ms());
 
     if !skip_link {
-        p3.show_message = true;
-        p3.message("Linking redirects :");
+        println!("  Linking redirects");
 
         // link all redirects
         for entry in zim.iterate_by_urls() {
@@ -122,16 +102,15 @@ fn main() {
                     std::fs::hard_link(src, dst).unwrap();
                 }
             }
-            p3.inc();
         }
 
-        p3.finish_print(&format!("Linking done in {}ms", sw.elapsed_ms()));
+        println!("  Linking done in {}ms", sw.elapsed_ms());
     } else {
-        p3.finish_print("Skipping...");
+        println!("  Skipping linking...");
     }
 
     if let Some(main_page_idx) = zim.header.main_page {
         let page = zim.get_by_url_index(main_page_idx).unwrap();
-        println!("Main page is {}", page.url);
+        println!("  Main page is {}", page.url);
     }
 }

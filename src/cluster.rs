@@ -1,8 +1,9 @@
 use std::io::Cursor;
+use std::io::Read;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use xz2::read::XzDecoder;
-use std::io::Read;
+use memmap::MmapViewSync;
 
 use errors::ParsingError;
 use zim::Zim;
@@ -12,12 +13,13 @@ use zim::Zim;
 /// Within an ZIM archive, clusters contain several blobs of data that are all compressed together.
 /// Each blob is the data for an article.
 #[allow(dead_code)]
-#[derive(Debug)]
 pub struct Cluster {
     start_off: u64,
     end_off: u64,
     comp_type: u8,
-    blob_list: Vec<u32>, // offsets into data
+    size: usize,
+    view: MmapViewSync,
+    blob_list: Option<Vec<u32>>, // offsets into data
     data: Vec<u8>,
 }
 
@@ -40,24 +42,41 @@ impl Cluster {
                 .ok();
             view
         };
-        let slice = unsafe { cluster_view.as_slice() };
-        let comp_type = slice[0];
-        let mut blob_list = Vec::new();
-        let data: Vec<u8> = if comp_type == 4 {
-            let mut decoder = XzDecoder::new(&slice[1..total_cluster_size]);
-            let mut data = Vec::new();
-            try!(decoder.read_to_end(&mut data));
 
-            // println!("Decompressed {} bytes of data", data.len());
-            data
+        Ok(Cluster {
+               comp_type: unsafe { cluster_view.as_slice()[0] },
+               start_off: this_cluster_off,
+               end_off: next_cluster_off,
+               data: Vec::new(),
+               size: total_cluster_size,
+               view: cluster_view,
+               blob_list: None,
+           })
+    }
+
+    pub fn decompress(&mut self) {
+        let slice = unsafe { self.view.as_slice() };
+
+        self.data = if self.comp_type == 4 {
+            let mut decoder = XzDecoder::new(&slice[1..self.size]);
+            let mut d = Vec::new();
+            decoder
+                .read_to_end(&mut d)
+                .ok()
+                .expect("failed to decompress");
+            d
         } else {
-            Vec::from(&slice[1..total_cluster_size])
+            Vec::from(&slice[1..self.size])
         };
-        let datalen = data.len();
+
+        let mut blob_list = Vec::new();
+        let datalen = self.data.len();
         {
-            let mut cur = Cursor::new(&data);
+            let mut cur = Cursor::new(&self.data);
             loop {
-                let offset = try!(cur.read_u32::<LittleEndian>());
+                let offset = cur.read_u32::<LittleEndian>()
+                    .ok()
+                    .expect("failed to read blob-list");
                 blob_list.push(offset);
                 if offset as usize >= datalen {
                     //println!("at end");
@@ -65,25 +84,29 @@ impl Cluster {
                 }
             }
         }
-
-        Ok(Cluster {
-               comp_type: comp_type,
-               start_off: this_cluster_off,
-               end_off: next_cluster_off,
-               data: data,
-               blob_list: blob_list,
-           })
-
+        self.blob_list = Some(blob_list);
     }
 
-    pub fn get_blob(&self, idx: u32) -> &[u8] {
-        let this_blob_off = self.blob_list[idx as usize] as usize;
-        let n = idx as usize + 1;
-        if self.blob_list.len() > n {
-            let next_blob_off = self.blob_list[n] as usize;
-            &self.data[this_blob_off..next_blob_off]
-        } else {
-            &self.data[this_blob_off..]
+    pub fn get_blob(&mut self, idx: u32) -> &[u8] {
+        // delay decompression until needed
+        match self.blob_list {
+            None => self.decompress(),
+            _ => {}
+        }
+
+        match self.blob_list {
+            Some(ref list) => {
+
+                let this_blob_off = list[idx as usize] as usize;
+                let n = idx as usize + 1;
+                if list.len() > n {
+                    let next_blob_off = list[n] as usize;
+                    &self.data[this_blob_off..next_blob_off]
+                } else {
+                    &self.data[this_blob_off..]
+                }
+            }
+            _ => panic!("no blob_list found"),
         }
     }
 }

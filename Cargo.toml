@@ -10,6 +10,7 @@ clap = "2.23"
 stopwatch = "0.0.7"
 pbr = "1.0"
 xz2 = "0.1"
+crossbeam = "0.2"
 
 [[bin]]
 name = "extract_zim"
