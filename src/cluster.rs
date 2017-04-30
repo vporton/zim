@@ -36,7 +36,8 @@ impl Cluster {
 
         let cluster_view = {
             let mut view = unsafe { zim.master_view.clone() };
-            view.restrict(this_cluster_off as usize, total_cluster_size).ok();
+            view.restrict(this_cluster_off as usize, total_cluster_size)
+                .ok();
             view
         };
         let slice = unsafe { cluster_view.as_slice() };
@@ -46,7 +47,7 @@ impl Cluster {
             let mut decoder = XzDecoder::new(&slice[1..total_cluster_size]);
             let mut data = Vec::new();
             try!(decoder.read_to_end(&mut data));
-            
+
             // println!("Decompressed {} bytes of data", data.len());
             data
         } else {

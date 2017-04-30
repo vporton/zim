@@ -2,7 +2,7 @@ extern crate memmap;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
-use memmap::{Mmap, MmapView};
+use memmap::{Mmap, MmapViewSync};
 
 use std::fs::File;
 use std::io::BufRead;
@@ -23,9 +23,7 @@ pub struct Zim {
     // Zim structure data:
     pub header: ZimHeader,
 
-    // internal variables:
-    f: File,
-    pub master_view: MmapView,
+    pub master_view: MmapViewSync,
 
     /// List of mimetypes used in this ZIM archive
     pub mime_table: Vec<String>, // a list of mimetypes
@@ -72,7 +70,7 @@ impl Zim {
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Zim, ParsingError> {
         let f = try!(File::open(p));
         let mmap = try!(Mmap::open(&f, memmap::Protection::Read));
-        let master_view = mmap.into_view();
+        let master_view = mmap.into_view_sync();
 
         let header_view = {
             let view = unsafe { master_view.clone() };
@@ -122,52 +120,59 @@ impl Zim {
         };
 
         let url_list = {
-            let mut list = Vec::new();
             let url_list_view = {
                 let mut v = unsafe { master_view.clone() };
-                v.restrict(url_ptr_pos as usize, article_count as usize * 8).ok();
+                v.restrict(url_ptr_pos as usize, article_count as usize * 8)
+                    .ok();
                 v
             };
             let mut url_cur = Cursor::new(unsafe { url_list_view.as_slice() });
 
-            for _ in 0..article_count {
-                let pointer = try!(url_cur.read_u64::<LittleEndian>());
-                list.push(pointer);
-            }
-            list
+            (0..article_count)
+                .map(|_| {
+                         url_cur
+                             .read_u64::<LittleEndian>()
+                             .ok()
+                             .expect("unable to read url_list")
+                     })
+                .collect()
         };
 
         let article_list = {
-            let mut list = Vec::new();
             let art_list_view = {
                 let mut v = unsafe { master_view.clone() };
-                v.restrict(title_ptr_pos as usize, article_count as usize * 8).ok();
+                v.restrict(title_ptr_pos as usize, article_count as usize * 8)
+                    .ok();
                 v
             };
             let mut art_cur = Cursor::new(unsafe { art_list_view.as_slice() });
 
-            for _ in 0..article_count {
-                let url_number = try!(art_cur.read_u32::<LittleEndian>());
-                list.push(url_number);
-            }
-            list
+            (0..article_count)
+                .map(|_| {
+                         art_cur
+                             .read_u32::<LittleEndian>()
+                             .ok()
+                             .expect("unable to read url_list")
+                     })
+                .collect()
         };
 
 
         let cluster_list = {
-            let mut list = Vec::new();
             let cluster_list_view = {
                 let mut v = unsafe { master_view.clone() };
                 try!(v.restrict(cluster_ptr_pos as usize, cluster_count as usize * 8));
                 v
             };
             let mut cluster_cur = Cursor::new(unsafe { cluster_list_view.as_slice() });
-
-            for _ in 0..cluster_count {
-                let pointer = try!(cluster_cur.read_u64::<LittleEndian>());
-                list.push(pointer);
-            }
-            list
+            (0..cluster_count)
+                .map(|_| {
+                         cluster_cur
+                             .read_u64::<LittleEndian>()
+                             .ok()
+                             .expect("unable to read url_list")
+                     })
+                .collect()
         };
 
         Ok(Zim {
@@ -186,7 +191,6 @@ impl Zim {
                    geo_index_pos: geo_index_pos,
                },
 
-               f: f,
                master_view: master_view,
                mime_table: mime_table,
                url_list: url_list,
