@@ -8,7 +8,7 @@
 
 extern crate byteorder;
 extern crate memmap;
-extern crate xz_decom;
+extern crate xz2;
 
 mod cluster;
 mod directory_entry;

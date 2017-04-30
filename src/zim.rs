@@ -15,7 +15,7 @@ use mime_type::MimeType;
 use errors::ParsingError;
 
 /// Magic number to recognise the file format, must be 72173914
-pub const ZimMagicNumber: u32 = 72173914;
+pub const ZIM_MAGIC_NUMBER: u32 = 72173914;
 
 /// Represents a ZIM file
 #[allow(dead_code)]
@@ -81,7 +81,7 @@ impl Zim {
 
         let mut header_cur = Cursor::new(unsafe { header_view.as_slice() });
         let magic = try!(header_cur.read_u32::<LittleEndian>());
-        assert_eq!(magic, ZimMagicNumber);
+        assert_eq!(magic, ZIM_MAGIC_NUMBER);
         let version = try!(header_cur.read_u32::<LittleEndian>());
         let uuid = [try!(header_cur.read_u64::<LittleEndian>()),
                     try!(header_cur.read_u64::<LittleEndian>())];
@@ -125,7 +125,7 @@ impl Zim {
             let mut list = Vec::new();
             let url_list_view = {
                 let mut v = unsafe { master_view.clone() };
-                v.restrict(url_ptr_pos as usize, article_count as usize * 8);
+                v.restrict(url_ptr_pos as usize, article_count as usize * 8).ok();
                 v
             };
             let mut url_cur = Cursor::new(unsafe { url_list_view.as_slice() });
@@ -141,7 +141,7 @@ impl Zim {
             let mut list = Vec::new();
             let art_list_view = {
                 let mut v = unsafe { master_view.clone() };
-                v.restrict(title_ptr_pos as usize, article_count as usize * 8);
+                v.restrict(title_ptr_pos as usize, article_count as usize * 8).ok();
                 v
             };
             let mut art_cur = Cursor::new(unsafe { art_list_view.as_slice() });
@@ -158,7 +158,7 @@ impl Zim {
             let mut list = Vec::new();
             let cluster_list_view = {
                 let mut v = unsafe { master_view.clone() };
-                v.restrict(cluster_ptr_pos as usize, cluster_count as usize * 8);
+                try!(v.restrict(cluster_ptr_pos as usize, cluster_count as usize * 8));
                 v
             };
             let mut cluster_cur = Cursor::new(unsafe { cluster_list_view.as_slice() });
@@ -228,7 +228,7 @@ impl Zim {
         let dir_view = {
             let mut view = unsafe { self.master_view.clone() };
             let len = view.len();
-            view.restrict(entry_offset, len - entry_offset);
+            view.restrict(entry_offset, len - entry_offset).ok();
             view
         };
         let slice = unsafe { dir_view.as_slice() };

@@ -1,7 +1,8 @@
 use std::io::Cursor;
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use xz_decom::decompress;
+use xz2::read::XzDecoder;
+use std::io::Read;
 
 use errors::ParsingError;
 use zim::Zim;
@@ -10,7 +11,8 @@ use zim::Zim;
 ///
 /// Within an ZIM archive, clusters contain several blobs of data that are all compressed together.
 /// Each blob is the data for an article.
-//#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug)]
 pub struct Cluster {
     start_off: u64,
     end_off: u64,
@@ -34,14 +36,17 @@ impl Cluster {
 
         let cluster_view = {
             let mut view = unsafe { zim.master_view.clone() };
-            view.restrict(this_cluster_off as usize, total_cluster_size);
+            view.restrict(this_cluster_off as usize, total_cluster_size).ok();
             view
         };
         let slice = unsafe { cluster_view.as_slice() };
         let comp_type = slice[0];
         let mut blob_list = Vec::new();
         let data: Vec<u8> = if comp_type == 4 {
-            let data = try!(decompress(&slice[1..total_cluster_size]));
+            let mut decoder = XzDecoder::new(&slice[1..total_cluster_size]);
+            let mut data = Vec::new();
+            try!(decoder.read_to_end(&mut data));
+            
             // println!("Decompressed {} bytes of data", data.len());
             data
         } else {

@@ -1,6 +1,3 @@
-
-use xz_decom::XZError;
-
 use std::error::Error;
 use std;
 use byteorder;
@@ -9,15 +6,6 @@ use byteorder;
 pub struct ParsingError {
     pub msg: &'static str,
     pub cause: Option<Box<Error>>,
-}
-
-impl From<XZError> for ParsingError {
-    fn from(e: XZError) -> ParsingError {
-        ParsingError {
-            msg: "Error decoding compressed data",
-            cause: Some(Box::new(e)),
-        }
-    }
 }
 
 impl From<byteorder::Error> for ParsingError {

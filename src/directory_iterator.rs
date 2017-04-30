@@ -31,7 +31,7 @@ impl<'a> std::iter::Iterator for DirectoryIterator<'a> {
             let dir_view = {
                 let mut view = unsafe { self.zim.master_view.clone() };
                 let len = view.len();
-                view.restrict(dir_entry_ptr, len - dir_entry_ptr);
+                view.restrict(dir_entry_ptr, len - dir_entry_ptr).ok();
                 view
             };
             let slice = unsafe { dir_view.as_slice() };
