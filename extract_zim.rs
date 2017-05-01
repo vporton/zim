@@ -3,13 +3,16 @@ extern crate clap;
 extern crate stopwatch;
 extern crate crossbeam;
 
-use clap::{Arg, App};
-use zim::{Zim, Target};
 use std::fs::File;
 use std::io::{Write, BufWriter};
+use std::error::Error;
 use std::collections::HashMap;
 use std::path::Path;
+
+use clap::{Arg, App};
 use stopwatch::Stopwatch;
+
+use zim::{Zim, Target};
 
 fn main() {
     let matches = App::new("zimextractor")
@@ -66,13 +69,7 @@ fn main() {
                     let mut s = String::new();
                     s.push(entry.namespace);
                     let out_path = root_output.join(&s).join(&entry.url);
-                    std::fs::create_dir_all(out_path.parent().unwrap()).unwrap();
-                    let data = cluster.get_blob(bid);
-                    let f = File::create(&out_path)
-                        .ok()
-                        .expect(&format!("failed to write file {:?}", out_path));
-                    let mut writer = BufWriter::new(&f);
-                    writer.write_all(data).unwrap();
+                    safe_write(&out_path, cluster.get_blob(bid), 0);
                 }
             }
         });
@@ -112,5 +109,51 @@ fn main() {
     if let Some(main_page_idx) = zim.header.main_page {
         let page = zim.get_by_url_index(main_page_idx).unwrap();
         println!("  Main page is {}", page.url);
+    }
+}
+
+fn safe_write(path: &Path, data: &[u8], count: usize) {
+    let display = path.display();
+    let contain_path = path.parent().unwrap();
+
+    ensure_dir(contain_path);
+
+    match File::create(&path) {
+        Err(why) => {
+            println!("couldn't create {}: {}", display, why.description());
+
+            if count == 1 {
+                safe_write(path, data, 2);
+            } else {
+                panic!("failed retry: couldn't create {}: {}",
+                       display,
+                       why.description());
+            }
+        }
+        Ok(file) => {
+            let mut writer = BufWriter::new(&file);
+
+            if let Err(why) = writer.write_all(data) {
+                println!("couldn't write to {}: {}", display, why.description());
+            }
+        }
+    }
+}
+
+fn ensure_dir(path: &Path) {
+    match std::fs::create_dir_all(path) {
+        Err(e) => {
+            use std::io::ErrorKind::*;
+
+            match e.kind() {
+                // do not panic if it already exists, that's fine, we just want to make
+                // sure we have it before moving on
+                AlreadyExists => {}
+                _ => {
+                    panic!("failed to create {}: {}", path.display(), e.description());
+                }
+            }
+        }
+        _ => {}
     }
 }
