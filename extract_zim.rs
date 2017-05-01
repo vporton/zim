@@ -69,7 +69,7 @@ fn main() {
                     let mut s = String::new();
                     s.push(entry.namespace);
                     let out_path = root_output.join(&s).join(&entry.url);
-                    safe_write(&out_path, cluster.get_blob(bid), 0);
+                    safe_write(&out_path, cluster.get_blob(bid), 1);
                 }
             }
         });
@@ -122,8 +122,8 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
         Err(why) => {
             println!("couldn't create {}: {}", display, why.description());
 
-            if count == 1 {
-                safe_write(path, data, 2);
+            if count < 3 {
+                safe_write(path, data, count + 1);
             } else {
                 panic!("failed retry: couldn't create {}: {}",
                        display,
