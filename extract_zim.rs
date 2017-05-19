@@ -69,7 +69,12 @@ fn main() {
                     let mut s = String::new();
                     s.push(entry.namespace);
                     let out_path = root_output.join(&s).join(&entry.url);
-                    safe_write(&out_path, cluster.get_blob(bid), 1);
+                    if out_path.starts_with(&out) {
+                      safe_write(&out_path, cluster.get_blob(bid), 1);
+                    } else {
+                      let new_out=&root_output.join(Path::new(&out_path.to_str().unwrap().replacen("/","./",1)));
+                      safe_write(&new_out, cluster.get_blob(bid), 1);
+                    }
                 }
             }
         });
