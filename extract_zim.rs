@@ -18,19 +18,25 @@ fn main() {
     let matches = App::new("zimextractor")
         .version("0.1")
         .about("Extract zim files")
-        .arg(Arg::with_name("out")
-                 .short("o")
-                 .long("out")
-                 .help("Output directory")
-                 .takes_value(true))
-        .arg(Arg::with_name("skip-link")
-                 .long("skip-link")
-                 .help("Skip genrating hard links")
-                 .takes_value(false))
-        .arg(Arg::with_name("INPUT")
-                 .help("Set the zim file to extract")
-                 .required(true)
-                 .index(1))
+        .arg(
+            Arg::with_name("out")
+                .short("o")
+                .long("out")
+                .help("Output directory")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("skip-link")
+                .long("skip-link")
+                .help("Skip genrating hard links")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("INPUT")
+                .help("Set the zim file to extract")
+                .required(true)
+                .index(1),
+        )
         .get_matches();
 
     let skip_link = matches.is_present("skip-link");
@@ -58,10 +64,10 @@ fn main() {
     println!("  Extracting entries: {}", zim.header.cluster_count);
 
     crossbeam::scope(|scope| for (cid, entries) in cluster_map {
-                         let mut cluster = zim.get_cluster(cid).unwrap();
+        let mut cluster = zim.get_cluster(cid).unwrap();
 
-                         scope.spawn(move || {
-            cluster.decompress();
+        scope.spawn(move || {
+            cluster.decompress().expect("failed to decompress cluster");
 
             for entry in entries {
                 if let Some(Target::Cluster(_cid, bid)) = entry.target {
@@ -69,16 +75,21 @@ fn main() {
                     let mut s = String::new();
                     s.push(entry.namespace);
                     let out_path = root_output.join(&s).join(&entry.url);
-                    if out_path.starts_with(&out) {
-                      safe_write(&out_path, cluster.get_blob(bid), 1);
+                    let blob = cluster.get_blob(bid).expect("failed to get blob");
+
+                    let p = if out_path.starts_with(&out) {
+                        out_path
                     } else {
-                      let new_out=&root_output.join(Path::new(&out_path.to_str().unwrap().replacen("/","./",1)));
-                      safe_write(&new_out, cluster.get_blob(bid), 1);
-                    }
+                        root_output.join(Path::new(
+                            &out_path.to_str().unwrap().replacen("/", "./", 1),
+                        ))
+                    };
+
+                    safe_write(&p, blob, 1);
                 }
             }
         });
-                     });
+    });
 
     println!("  Extraction done in {}ms", sw.elapsed_ms());
 
@@ -130,9 +141,11 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
             if count < 3 {
                 safe_write(path, data, count + 1);
             } else {
-                panic!("failed retry: couldn't create {}: {}",
-                       display,
-                       why.description());
+                panic!(
+                    "failed retry: couldn't create {}: {}",
+                    display,
+                    why.description()
+                );
             }
         }
         Ok(file) => {

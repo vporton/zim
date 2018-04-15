@@ -9,6 +9,7 @@
 extern crate byteorder;
 extern crate memmap;
 extern crate xz2;
+extern crate bitreader;
 
 mod cluster;
 mod directory_entry;

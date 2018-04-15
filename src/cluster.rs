@@ -3,107 +3,181 @@ use std::io::Read;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use xz2::read::XzDecoder;
-use memmap::MmapViewSync;
+use bitreader::BitReader;
+use memmap::Mmap;
 
-use errors::ParsingError;
-use zim::Zim;
+use errors::{Result, Error};
+
+#[repr(u8)]
+pub enum Compression {
+    None = 0,
+    LZMA2 = 4,
+}
+
+impl From<Compression> for u8 {
+    fn from(mode: Compression) -> u8 {
+        mode as u8
+    }
+}
+
+impl Compression {
+    pub fn from(raw: u8) -> Result<Compression> {
+        match raw {
+            0 => Ok(Compression::None),
+            1 => Ok(Compression::None),
+            4 => Ok(Compression::LZMA2),
+            _ => Err(Error::UnknownCompression),
+        }
+    }
+}
 
 /// A cluster of blobs
 ///
 /// Within an ZIM archive, clusters contain several blobs of data that are all compressed together.
 /// Each blob is the data for an article.
 #[allow(dead_code)]
-pub struct Cluster {
-    start_off: u64,
-    end_off: u64,
-    comp_type: u8,
-    size: usize,
-    view: MmapViewSync,
-    blob_list: Option<Vec<u32>>, // offsets into data
-    data: Vec<u8>,
+pub struct Cluster<'a> {
+    extended: bool,
+    compression: Compression,
+    start: u64,
+    end: u64,
+    size: u64,
+    view: &'a [u8],
+    blob_list: Option<Vec<u64>>, // offsets into data
+    decompressed: Option<Vec<u8>>,
 }
 
-impl Cluster {
-    pub fn new(zim: &Zim, idx: u32) -> Result<Cluster, ParsingError> {
+impl<'a> Cluster<'a> {
+    pub fn new(
+        master_view: &'a Mmap,
+        cluster_list: &'a Vec<u64>,
+        idx: u32,
+        checksum_pos: u64,
+    ) -> Result<Cluster<'a>> {
         let idx = idx as usize;
-        let this_cluster_off = zim.cluster_list[idx];
-        let next_cluster_off = if idx < zim.cluster_list.len() - 1 {
-            zim.cluster_list[idx + 1]
+        let start = cluster_list[idx];
+        let end = if idx < cluster_list.len() - 1 {
+            cluster_list[idx + 1]
         } else {
-            zim.header.checksum_pos
+            checksum_pos
         };
 
-        assert!(next_cluster_off > this_cluster_off);
-        let total_cluster_size: usize = (next_cluster_off - this_cluster_off) as usize;
+        assert!(end > start);
+        let cluster_size = end - start;
+        let cluster_view = master_view.get(start as usize..end as usize).ok_or(
+            Error::OutOfBounds,
+        )?;
 
-        let cluster_view = {
-            let mut view = unsafe { zim.master_view.clone() };
-            view.restrict(this_cluster_off as usize, total_cluster_size)
-                .ok();
-            view
-        };
+        let (extended, compression) =
+            parse_details(cluster_view.get(0).ok_or(Error::OutOfBounds)?)?;
 
         Ok(Cluster {
-               comp_type: unsafe { cluster_view.as_slice()[0] },
-               start_off: this_cluster_off,
-               end_off: next_cluster_off,
-               data: Vec::new(),
-               size: total_cluster_size,
-               view: cluster_view,
-               blob_list: None,
-           })
+            extended: extended,
+            compression: compression,
+            start: start,
+            end: end,
+            size: cluster_size,
+            view: cluster_view,
+            decompressed: None,
+            blob_list: None,
+        })
     }
 
-    pub fn decompress(&mut self) {
-        let slice = unsafe { self.view.as_slice() };
-
-        self.data = if self.comp_type == 4 {
-            let mut decoder = XzDecoder::new(&slice[1..self.size]);
-            let mut d = Vec::new();
-            decoder
-                .read_to_end(&mut d)
-                .ok()
-                .expect("failed to decompress");
-            d
-        } else {
-            Vec::from(&slice[1..self.size])
-        };
-
-        let mut blob_list = Vec::new();
-        let datalen = self.data.len();
-        {
-            let mut cur = Cursor::new(&self.data);
-            loop {
-                let offset = cur.read_u32::<LittleEndian>()
-                    .ok()
-                    .expect("failed to read blob_list");
-                blob_list.push(offset);
-                if offset as usize >= datalen {
-                    //println!("at end");
-                    break;
+    pub fn decompress(&mut self) -> Result<()> {
+        match self.compression {
+            Compression::LZMA2 => {
+                if self.decompressed.is_none() {
+                    let mut decoder = XzDecoder::new(&self.view[1..]);
+                    let mut d = Vec::new();
+                    decoder.read_to_end(&mut d)?;
+                    self.decompressed = Some(d);
                 }
             }
-        }
-        self.blob_list = Some(blob_list);
-    }
-
-    pub fn get_blob(&mut self, idx: u32) -> &[u8] {
-        // delay decompression until needed
-        if self.blob_list.is_none() {
-            self.decompress();
+            Compression::None => {}
         }
 
-        if let Some(ref list) = self.blob_list {
-            let this_blob_off = list[idx as usize] as usize;
-            let n = idx as usize + 1;
-            if list.len() > n {
-                let next_blob_off = list[n] as usize;
-                &self.data[this_blob_off..next_blob_off]
-            } else {
-                &self.data[this_blob_off..]
+        match self.blob_list {
+            Some(_) => {}
+            None => {
+                let blob_list = match self.compression {
+                    Compression::LZMA2 => {
+                        let mut cur = Cursor::new(self.decompressed.as_ref().unwrap());
+                        parse_blob_list(cur, self.extended)?
+                    }
+                    Compression::None => {
+                        let mut cur = Cursor::new(&self.view[1..]);
+                        parse_blob_list(cur, self.extended)?
+                    }
+                };
+                self.blob_list = Some(blob_list);
             }
-        } else {
-            panic!("no blob_list found")
+        }
+
+        Ok(())
+    }
+
+    pub fn get_blob(&mut self, idx: u32) -> Result<&[u8]> {
+        self.decompress()?;
+
+        match self.blob_list {
+            Some(ref list) => {
+                let start = list[idx as usize] as usize;
+                let n = idx as usize + 1;
+                let end = if list.len() > n {
+                    list[n] as usize
+                } else {
+                    self.size as usize
+                };
+
+                Ok(match self.compression {
+                    Compression::LZMA2 => {
+                        // decompressed, so we know this exists
+                        &self.decompressed.as_ref().unwrap().as_slice()[start..end]
+                    }
+                    Compression::None => &self.view[1 + start..1 + end],
+                })
+            }
+            None => Err(Error::MissingBlobList),
         }
     }
+}
+
+fn parse_details(details: &u8) -> Result<(bool, Compression)> {
+    let slice = &[*details];
+    let mut reader = BitReader::new(slice);
+    // skip first three bytes
+    reader.skip(3)?;
+
+    // extended mode is the 4th byte from the left
+    // compression are the last four bytes
+
+    Ok((
+        reader.read_bool()?,
+        Compression::from(reader.read_u8(4)?)?,
+    ))
+}
+
+fn parse_blob_list<T: ReadBytesExt>(mut cur: T, extended: bool) -> Result<Vec<u64>> {
+    let mut blob_list = Vec::new();
+
+    // determine the count of blobs, by reading the first offset
+    let first = if extended {
+        cur.read_u64::<LittleEndian>()?
+    } else {
+        cur.read_u32::<LittleEndian>()? as u64
+    };
+
+    let count = if extended { first / 8 } else { first / 4 };
+
+    blob_list.push(first);
+
+    for _ in 0..(count as usize - 1) {
+        if extended {
+            blob_list.push(cur.read_u64::<LittleEndian>()?);
+        } else {
+            blob_list.push(cur.read_u32::<LittleEndian>()? as u64);
+        }
+    }
+
+    Ok(blob_list)
 }

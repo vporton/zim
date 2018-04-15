@@ -1,8 +1,6 @@
-extern crate memmap;
-
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
-use memmap::{Mmap, MmapViewSync};
+use memmap::Mmap;
 
 use std::fs::File;
 use std::io::BufRead;
@@ -12,7 +10,7 @@ use cluster::Cluster;
 use directory_entry::DirectoryEntry;
 use directory_iterator::DirectoryIterator;
 use mime_type::MimeType;
-use errors::ParsingError;
+use errors::{Result, Error};
 
 /// Magic number to recognise the file format, must be 72173914
 pub const ZIM_MAGIC_NUMBER: u32 = 72173914;
@@ -23,7 +21,7 @@ pub struct Zim {
     // Zim structure data:
     pub header: ZimHeader,
 
-    pub master_view: MmapViewSync,
+    pub master_view: Mmap,
 
     /// List of mimetypes used in this ZIM archive
     pub mime_table: Vec<String>, // a list of mimetypes
@@ -67,146 +65,27 @@ impl Zim {
     ///
     /// Loads a Zim file and parses the header, and the url, title, and cluster offset tables.  The
     /// rest of the data isn't parsed until it's needed, so this should be fairly quick.
-    pub fn new<P: AsRef<Path>>(p: P) -> Result<Zim, ParsingError> {
+    pub fn new<P: AsRef<Path>>(p: P) -> Result<Zim> {
         let f = File::open(p)?;
-        let mmap = Mmap::open(&f, memmap::Protection::Read)?;
-        let master_view = mmap.into_view_sync();
+        let master_view = unsafe { Mmap::map(&f)? };
 
-        let header_view = unsafe { master_view.clone() };
-        let mut header_cur = Cursor::new(unsafe { header_view.as_slice() });
+        let (header, mime_table) = parse_header(&master_view)?;
 
-        let magic = header_cur.read_u32::<LittleEndian>()?;
+        let url_list = parse_url_list(&master_view, header.url_ptr_pos, header.article_count)?;
+        let article_list =
+            parse_article_list(&master_view, header.title_ptr_pos, header.article_count)?;
 
-        if magic != ZIM_MAGIC_NUMBER {
-            return Err(ParsingError {
-                           msg: "Invalid magic number",
-                           cause: None,
-                       });
-        }
-
-        let version = header_cur.read_u32::<LittleEndian>()?;
-        let uuid = [header_cur.read_u64::<LittleEndian>()?,
-                    header_cur.read_u64::<LittleEndian>()?];
-        let article_count = header_cur.read_u32::<LittleEndian>()?;
-        let cluster_count = header_cur.read_u32::<LittleEndian>()?;
-        let url_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
-        let title_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
-        let cluster_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
-        let mime_list_pos = header_cur.read_u64::<LittleEndian>()?;
-
-        let main_page = header_cur.read_u32::<LittleEndian>()?;
-        let layout_page = header_cur.read_u32::<LittleEndian>()?;
-        let checksum_pos = header_cur.read_u64::<LittleEndian>()?;
-
-        if header_cur.position() != 80 {
-            return Err(ParsingError {
-                           msg: "Inconsistent header parse",
-                           cause: None,
-                       });
-        }
-
-        let geo_index_pos = if mime_list_pos > 80 {
-            Some(header_cur.read_u64::<LittleEndian>()?)
-        } else {
-            None
-        };
-
-        // the mime table is always directly after the 80-byte header, so we'll keep
-        // using our header cursor
-        let mime_table = {
-            let mut mime_table = Vec::new();
-            loop {
-                let mut mime_buf = Vec::new();
-                if let Ok(size) = header_cur.read_until(0, &mut mime_buf) {
-                    if size <= 1 {
-                        break;
-                    }
-                    mime_buf.truncate(size - 1);
-                    mime_table.push(String::from_utf8(mime_buf)?);
-                }
-            }
-            mime_table
-        };
-
-        let url_list = {
-            let url_list_view = {
-                let mut v = unsafe { master_view.clone() };
-                v.restrict(url_ptr_pos as usize, article_count as usize * 8)
-                    .ok();
-                v
-            };
-            let mut url_cur = Cursor::new(unsafe { url_list_view.as_slice() });
-
-            (0..article_count)
-                .map(|_| {
-                         url_cur
-                             .read_u64::<LittleEndian>()
-                             .ok()
-                             .expect("unable to read url_list")
-                     })
-                .collect()
-        };
-
-        let article_list = {
-            let art_list_view = {
-                let mut v = unsafe { master_view.clone() };
-                v.restrict(title_ptr_pos as usize, article_count as usize * 8)
-                    .ok();
-                v
-            };
-            let mut art_cur = Cursor::new(unsafe { art_list_view.as_slice() });
-
-            (0..article_count)
-                .map(|_| {
-                         art_cur
-                             .read_u32::<LittleEndian>()
-                             .ok()
-                             .expect("unable to read url_list")
-                     })
-                .collect()
-        };
-
-
-        let cluster_list = {
-            let cluster_list_view = {
-                let mut v = unsafe { master_view.clone() };
-                v.restrict(cluster_ptr_pos as usize, cluster_count as usize * 8)?;
-                v
-            };
-            let mut cluster_cur = Cursor::new(unsafe { cluster_list_view.as_slice() });
-            (0..cluster_count)
-                .map(|_| {
-                         cluster_cur
-                             .read_u64::<LittleEndian>()
-                             .ok()
-                             .expect("unable to read url_list")
-                     })
-                .collect()
-        };
+        let cluster_list =
+            parse_cluster_list(&master_view, header.cluster_ptr_pos, header.cluster_count)?;
 
         Ok(Zim {
-               header: ZimHeader {
-                   version: version,
-                   uuid: uuid,
-                   article_count: article_count,
-                   cluster_count: cluster_count,
-                   url_ptr_pos: url_ptr_pos,
-                   title_ptr_pos: title_ptr_pos,
-                   cluster_ptr_pos: cluster_ptr_pos,
-                   mime_list_pos: mime_list_pos,
-                   main_page: is_defined(main_page),
-                   layout_page: is_defined(layout_page),
-                   checksum_pos: checksum_pos,
-                   geo_index_pos: geo_index_pos,
-               },
-
-               master_view: master_view,
-               mime_table: mime_table,
-               url_list: url_list,
-               article_list: article_list,
-               cluster_list: cluster_list,
-           })
-
+            header: header,
+            master_view: master_view,
+            mime_table: mime_table,
+            url_list: url_list,
+            article_list: article_list,
+            cluster_list: cluster_list,
+        })
     }
 
     /// Indexes into the ZIM mime_table.
@@ -238,21 +117,21 @@ impl Zim {
     /// idx must be between 0 and `article_count`
     pub fn get_by_url_index(&self, idx: u32) -> Option<DirectoryEntry> {
         let entry_offset = self.url_list[idx as usize] as usize;
-        let dir_view = {
-            let mut view = unsafe { self.master_view.clone() };
-            let len = view.len();
-            view.restrict(entry_offset, len - entry_offset).ok();
-            view
-        };
-        let slice = unsafe { dir_view.as_slice() };
-        DirectoryEntry::new(self, slice).ok()
+        let (_, dir_view) = self.master_view.split_at(entry_offset);
+
+        DirectoryEntry::new(self, dir_view).ok()
     }
 
     /// Returns the given `Cluster`
     ///
     /// idx must be between 0 and `cluster_count`
     pub fn get_cluster(&self, idx: u32) -> Option<Cluster> {
-        Cluster::new(self, idx).ok()
+        Cluster::new(
+            &self.master_view,
+            &self.cluster_list,
+            idx,
+            self.header.checksum_pos,
+        ).ok()
     }
 }
 
@@ -260,17 +139,134 @@ fn is_defined(val: u32) -> Option<u32> {
     if val == 0xffffffff { None } else { Some(val) }
 }
 
+fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {
+    let mut header_cur = Cursor::new(master_view);
+
+    let magic = header_cur.read_u32::<LittleEndian>()?;
+
+    if magic != ZIM_MAGIC_NUMBER {
+        return Err(Error::InvalidMagicNumber);
+    }
+
+    let version = header_cur.read_u32::<LittleEndian>()?;
+    let uuid = [
+        header_cur.read_u64::<LittleEndian>()?,
+        header_cur.read_u64::<LittleEndian>()?,
+    ];
+    let article_count = header_cur.read_u32::<LittleEndian>()?;
+    let cluster_count = header_cur.read_u32::<LittleEndian>()?;
+    let url_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
+    let title_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
+    let cluster_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
+    let mime_list_pos = header_cur.read_u64::<LittleEndian>()?;
+
+    let main_page = header_cur.read_u32::<LittleEndian>()?;
+    let layout_page = header_cur.read_u32::<LittleEndian>()?;
+    let checksum_pos = header_cur.read_u64::<LittleEndian>()?;
+
+    if header_cur.position() != 80 {
+        return Err(Error::InvalidHeader);
+    }
+
+    let geo_index_pos = if mime_list_pos > 80 {
+        Some(header_cur.read_u64::<LittleEndian>()?)
+    } else {
+        None
+    };
+
+    // the mime table is always directly after the 80-byte header, so we'll keep
+    // using our header cursor
+    let mime_table = {
+        let mut mime_table = Vec::new();
+        loop {
+            let mut mime_buf = Vec::new();
+            if let Ok(size) = header_cur.read_until(0, &mut mime_buf) {
+                if size <= 1 {
+                    break;
+                }
+                mime_buf.truncate(size - 1);
+                mime_table.push(String::from_utf8(mime_buf)?);
+            }
+        }
+        mime_table
+    };
+
+    Ok((
+        ZimHeader {
+            version: version,
+            uuid: uuid,
+            article_count: article_count,
+            cluster_count: cluster_count,
+            url_ptr_pos: url_ptr_pos,
+            title_ptr_pos: title_ptr_pos,
+            cluster_ptr_pos: cluster_ptr_pos,
+            mime_list_pos: mime_list_pos,
+            main_page: is_defined(main_page),
+            layout_page: is_defined(layout_page),
+            checksum_pos: checksum_pos,
+            geo_index_pos: geo_index_pos,
+        },
+        mime_table,
+    ))
+}
+
+fn parse_url_list(master_view: &Mmap, ptr_pos: u64, count: u32) -> Result<Vec<u64>> {
+    let start = ptr_pos as usize;
+    let end = (ptr_pos + count as u64 * 8) as usize;
+    let list_view = master_view.get(start..end).ok_or(Error::OutOfBounds)?;
+    let mut cur = Cursor::new(list_view);
+
+    let mut out: Vec<u64> = Vec::new();
+    for _ in 0..count {
+        out.push(cur.read_u64::<LittleEndian>()?);
+    }
+
+    Ok(out)
+}
+
+fn parse_article_list(master_view: &Mmap, ptr_pos: u64, count: u32) -> Result<Vec<u32>> {
+    let start = ptr_pos as usize;
+    let end = (ptr_pos as u32 + count * 4) as usize;
+    let list_view = master_view.get(start..end).ok_or(Error::OutOfBounds)?;
+
+    let mut cur = Cursor::new(list_view);
+    let mut out: Vec<u32> = Vec::new();
+
+    for _ in 0..count {
+        out.push(cur.read_u32::<LittleEndian>()?);
+    }
+
+    Ok(out)
+}
+
+fn parse_cluster_list(master_view: &Mmap, ptr_pos: u64, count: u32) -> Result<Vec<u64>> {
+    let start = ptr_pos as usize;
+    let end = (ptr_pos as u32 + count * 8) as usize;
+    let cluster_list_view = master_view.get(start..end).ok_or(Error::OutOfBounds)?;
+
+    let mut cluster_cur = Cursor::new(cluster_list_view);
+    let mut out: Vec<u64> = Vec::new();
+    for _ in 0..count {
+        out.push(cluster_cur.read_u64::<LittleEndian>()?);
+    }
+    Ok(out)
+}
+
 #[test]
 fn test_zim() {
-    // we want to handle all URLs from the same cluster at the same time,
-    // so build a map between cluster
-    // build a mapping from
-
-    let zim = Zim::new("fixtures/wikipedia_ab_all_2017-03.zim")
-        .ok()
-        .unwrap();
+    let zim = Zim::new("fixtures/wikipedia_ab_all_2017-03.zim").expect("failed to parse fixture");
 
     assert_eq!(zim.header.version, 5);
+    let mut cl0 = zim.get_cluster(0).unwrap();
+    assert_eq!(cl0.get_blob(0).unwrap(), &[97, 98, 107]);
+
+    let mut cl1 = zim.get_cluster(zim.header.cluster_count - 1).unwrap();
+    let b = cl1.get_blob(0).unwrap();
+    assert_eq!(&b[0..10], &[71, 73, 70, 56, 57, 97, 44, 1, 150, 0]);
+    assert_eq!(
+        &b[b.len() - 10..],
+        &[222, 192, 21, 240, 155, 91, 65, 0, 0, 59]
+    );
 
     assert_eq!(zim.iterate_by_urls().count(), 3111);
 }

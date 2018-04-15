@@ -6,7 +6,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use target::Target;
 use mime_type::MimeType;
-use errors::ParsingError;
+use errors::{Error, Result};
 use zim::Zim;
 
 /// Holds metadata about an article
@@ -28,14 +28,10 @@ pub struct DirectoryEntry {
 }
 
 impl DirectoryEntry {
-    pub fn new(zim: &Zim, s: &[u8]) -> Result<DirectoryEntry, ParsingError> {
+    pub fn new(zim: &Zim, s: &[u8]) -> Result<DirectoryEntry> {
         let mut cur = Cursor::new(s);
         let mime_id = cur.read_u16::<LittleEndian>()?;
-        let mime_type = zim.get_mimetype(mime_id)
-            .ok_or(ParsingError {
-                       msg: "No such Mimetype",
-                       cause: None,
-                   })?;
+        let mime_type = zim.get_mimetype(mime_id).ok_or(Error::UnknownMimeType)?;
         let _ = cur.read_u8()?;
         let namespace = cur.read_u8()?;
         let rev = cur.read_u32::<LittleEndian>().ok();
@@ -67,12 +63,12 @@ impl DirectoryEntry {
 
 
         Ok(DirectoryEntry {
-               mime_type: mime_type,
-               namespace: std::char::from_u32(namespace as u32).unwrap(),
-               revision: rev,
-               url: url,
-               title: title,
-               target: target,
-           })
+            mime_type: mime_type,
+            namespace: std::char::from_u32(namespace as u32).unwrap(),
+            revision: rev,
+            url: url,
+            title: title,
+            target: target,
+        })
     }
 }
