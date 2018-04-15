@@ -53,6 +53,7 @@ impl<'a> Cluster<'a> {
         cluster_list: &'a Vec<u64>,
         idx: u32,
         checksum_pos: u64,
+        version: u16,
     ) -> Result<Cluster<'a>> {
         let idx = idx as usize;
         let start = cluster_list[idx];
@@ -70,6 +71,11 @@ impl<'a> Cluster<'a> {
 
         let (extended, compression) =
             parse_details(cluster_view.get(0).ok_or(Error::OutOfBounds)?)?;
+
+        // extended clusters are only allowed in version 6
+        if extended && version != 6 {
+            return Err(Error::InvalidClusterExtension);
+        }
 
         Ok(Cluster {
             extended: extended,

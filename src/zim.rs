@@ -32,8 +32,10 @@ pub struct Zim {
 
 /// A ZIM file starts with a header.
 pub struct ZimHeader {
-    /// ZIM=5, bytes 1-2: major, bytes 3-4: minor version of the ZIM file format
-    pub version: u32,
+    /// Major version, either 5 or 6
+    pub version_major: u16,
+    /// Minor version
+    pub version_minor: u16,
     /// unique id of this zim file
     pub uuid: [u64; 2],
     /// total number of articles
@@ -131,6 +133,7 @@ impl Zim {
             &self.cluster_list,
             idx,
             self.header.checksum_pos,
+            self.header.version_major,
         ).ok()
     }
 }
@@ -148,7 +151,13 @@ fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {
         return Err(Error::InvalidMagicNumber);
     }
 
-    let version = header_cur.read_u32::<LittleEndian>()?;
+    let version_major = header_cur.read_u16::<LittleEndian>()?;
+    if version_major != 5 && version_major != 6 {
+        return Err(Error::InvalidVersion);
+    }
+
+    let version_minor = header_cur.read_u16::<LittleEndian>()?;
+
     let uuid = [
         header_cur.read_u64::<LittleEndian>()?,
         header_cur.read_u64::<LittleEndian>()?,
@@ -193,7 +202,8 @@ fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {
 
     Ok((
         ZimHeader {
-            version: version,
+            version_major: version_major,
+            version_minor: version_minor,
             uuid: uuid,
             article_count: article_count,
             cluster_count: cluster_count,
@@ -256,7 +266,7 @@ fn parse_cluster_list(master_view: &Mmap, ptr_pos: u64, count: u32) -> Result<Ve
 fn test_zim() {
     let zim = Zim::new("fixtures/wikipedia_ab_all_2017-03.zim").expect("failed to parse fixture");
 
-    assert_eq!(zim.header.version, 5);
+    assert_eq!(zim.header.version_major, 5);
     let mut cl0 = zim.get_cluster(0).unwrap();
     assert_eq!(cl0.get_blob(0).unwrap(), &[97, 98, 107]);
 
