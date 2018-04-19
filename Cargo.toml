@@ -13,6 +13,7 @@ pbr = "^1.0"
 xz2 = "^0.1"
 crossbeam = "^0.3"
 bitreader = "^0.3"
+scoped_threadpool = "^0.1"
 
 [[bin]]
 name = "extract_zim"

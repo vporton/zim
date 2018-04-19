@@ -17,14 +17,18 @@ fn main() {
     let matches = App::new("zim-linkr")
         .version("0.1")
         .about("Link ipfs files via 'ipfs files' api")
-        .arg(Arg::with_name("ROOT")
-                 .help("Root of the extracted content in the 'ipfs files' api")
-                 .required(true)
-                 .index(1))
-        .arg(Arg::with_name("INPUT")
-                 .help("The zim file with link data in")
-                 .required(true)
-                 .index(2))
+        .arg(
+            Arg::with_name("ROOT")
+                .help("Root of the extracted content in the 'ipfs files' api")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::with_name("INPUT")
+                .help("The zim file with link data in")
+                .required(true)
+                .index(2),
+        )
         .get_matches();
 
     let root = matches.value_of("ROOT").unwrap();
@@ -80,9 +84,11 @@ fn main() {
             let dst = root_output.join(&s).join(&entry.url);
 
             if src != dst {
-                ops.push(format!("ipfs files cp {} {}",
-                                 src.to_str().unwrap(),
-                                 dst.to_str().unwrap()));
+                ops.push(format!(
+                    "ipfs files cp {} {}",
+                    src.to_str().unwrap(),
+                    dst.to_str().unwrap()
+                ));
             }
         }
         p3.inc();

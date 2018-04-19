@@ -117,24 +117,24 @@ impl Zim {
     /// Returns the `DirectoryEntry` for the article found at the given URL index.
     ///
     /// idx must be between 0 and `article_count`
-    pub fn get_by_url_index(&self, idx: u32) -> Option<DirectoryEntry> {
+    pub fn get_by_url_index(&self, idx: u32) -> Result<DirectoryEntry> {
         let entry_offset = self.url_list[idx as usize] as usize;
         let (_, dir_view) = self.master_view.split_at(entry_offset);
 
-        DirectoryEntry::new(self, dir_view).ok()
+        DirectoryEntry::new(self, dir_view)
     }
 
     /// Returns the given `Cluster`
     ///
     /// idx must be between 0 and `cluster_count`
-    pub fn get_cluster(&self, idx: u32) -> Option<Cluster> {
+    pub fn get_cluster(&self, idx: u32) -> Result<Cluster> {
         Cluster::new(
             &self.master_view,
             &self.cluster_list,
             idx,
             self.header.checksum_pos,
             self.header.version_major,
-        ).ok()
+        )
     }
 }
 

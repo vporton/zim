@@ -21,3 +21,5 @@ mod zim;
 
 pub use target::Target;
 pub use zim::Zim;
+pub use cluster::Cluster;
+pub use directory_entry::DirectoryEntry;
