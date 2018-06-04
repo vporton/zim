@@ -1,36 +1,66 @@
-use std::error::Error;
 use std;
-use byteorder;
+use std::fmt;
+use bitreader;
 
-/// An error type for parsing errors
-pub struct ParsingError {
-    pub msg: &'static str,
-    pub cause: Option<Box<Error>>,
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
+pub enum Error {
+    UnknownCompression,
+    UnknownMimeType,
+    InvalidMagicNumber,
+    InvalidVersion,
+    InvalidHeader,
+    InvalidClusterExtension,
+    MissingBlobList,
+    OutOfBounds,
+    ParsingError(Box<std::error::Error + Send + Sync>),
 }
 
-impl From<byteorder::Error> for ParsingError {
-    fn from(e: byteorder::Error) -> ParsingError {
-        ParsingError {
-            msg: "Error reading bytestream",
-            cause: Some(Box::new(e)),
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(std::error::Error::description(self))
+    }
+}
+
+impl std::error::Error for Error {
+    fn description(&self) -> &str {
+        match *self {
+            Error::UnknownCompression => "unknown compression",
+            Error::UnknownMimeType => "unknown mimetype",
+            Error::InvalidMagicNumber => "invalid magic number",
+            Error::InvalidVersion => "invalid major version, must be 5 or 6",
+            Error::InvalidHeader => "invalid header",
+            Error::InvalidClusterExtension => "cluster extension requires major version 6",
+            Error::MissingBlobList => "cluster is missing a blob list",
+            Error::OutOfBounds => "out of bounds access",
+            Error::ParsingError(_) => "failed to parse",
+        }
+    }
+
+    #[inline]
+    fn cause(&self) -> Option<&std::error::Error> {
+        match *self {
+            Error::ParsingError(ref err) => Some(&**err),
+            _ => None,
         }
     }
 }
 
-impl From<std::string::FromUtf8Error> for ParsingError {
-    fn from(e: std::string::FromUtf8Error) -> ParsingError {
-        ParsingError {
-            msg: "Error converting to string",
-            cause: Some(Box::new(e)),
-        }
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(err: std::string::FromUtf8Error) -> Error {
+        Error::ParsingError(err.into())
     }
 }
 
-impl From<std::io::Error> for ParsingError {
-    fn from(e: std::io::Error) -> ParsingError {
-        ParsingError {
-            msg: "Error reading bytestream",
-            cause: Some(Box::new(e)),
-        }
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Error {
+        Error::ParsingError(err.into())
+    }
+}
+
+impl From<bitreader::BitReaderError> for Error {
+    fn from(err: bitreader::BitReaderError) -> Error {
+        Error::ParsingError(err.into())
     }
 }
