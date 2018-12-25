@@ -1,20 +1,22 @@
-extern crate zim;
 extern crate clap;
-extern crate stopwatch;
+extern crate num_cpus;
 extern crate scoped_threadpool;
+extern crate stopwatch;
+extern crate zim;
 
-use std::fs::File;
-use std::io::{Write, BufWriter};
-use std::error::Error;
 use std::collections::HashMap;
+use std::error::Error;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::sync::Arc;
 
-use clap::{Arg, App};
-use stopwatch::Stopwatch;
+use clap::{App, Arg};
 use scoped_threadpool::Pool;
+use stopwatch::Stopwatch;
 
-use zim::{Zim, Target, DirectoryEntry, Cluster};
+use zim::{Cluster, DirectoryEntry, Target, Zim};
 
 fn main() {
     let matches = App::new("zimextractor")
@@ -26,26 +28,22 @@ fn main() {
                 .long("out")
                 .help("Output directory")
                 .takes_value(true),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("skip-link")
                 .long("skip-link")
                 .help("Skip genrating hard links")
                 .takes_value(false),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("flatten-link")
                 .long("flatten-link")
                 .help("Write files to disk, instead of using hard links")
                 .takes_value(false),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("INPUT")
                 .help("Set the zim file to extract")
                 .required(true)
                 .index(1),
-        )
-        .get_matches();
+        ).get_matches();
 
     let skip_link = matches.is_present("skip-link");
     let flatten_link = matches.is_present("flatten-link");
@@ -78,41 +76,53 @@ fn main() {
         println!("  Extracting links: {}", cluster_map.get(&0).unwrap().len());
     }
 
-    println!("  Spawning {} threads", cluster_map.len());
+    let threads = num_cpus::get();
+    println!(
+        "  Spawning {} tasks across {} threads",
+        cluster_map.len(),
+        threads
+    );
 
+    let (tx, rx) = mpsc::channel();
 
-    let mut pool = Pool::new(16);
+    let mut pool = Pool::new(threads as u32);
     let zim_file_arc = Arc::new(&zim_file);
 
-    pool.scoped(|scope| for (cid, entries) in cluster_map {
-        let zim_file_arc = zim_file_arc.clone();
+    pool.scoped(|scope| {
+        for (cid, entries) in cluster_map {
+            let zim_file_arc = zim_file_arc.clone();
+            let tx = tx.clone();
+            scope.execute(move || {
+                let mut cluster = if cid == link_entry {
+                    None
+                } else {
+                    Some(zim_file_arc.get_cluster(cid).unwrap())
+                };
 
-        scope.execute(move || {
-            let mut cluster = if cid == link_entry {
-                None
-            } else {
-                Some(zim_file_arc.get_cluster(cid).unwrap())
-            };
-
-            for entry in entries {
-                process_target(
-                    zim_file_arc.clone(),
-                    &mut cluster,
-                    root_output,
-                    &entry,
-                    flatten_link,
-                    skip_link,
-                );
-            }
-        });
+                for entry in entries {
+                    process_target(
+                        zim_file_arc.clone(),
+                        &mut cluster,
+                        root_output,
+                        &entry,
+                        skip_link,
+                        &tx,
+                    );
+                }
+            });
+        }
     });
+
+    for (src, dst) in rx.try_iter() {
+        make_link(src, dst, flatten_link)
+    }
 
     println!("  Extraction done in {}ms", sw.elapsed_ms());
 
     if let Some(main_page_idx) = zim_file.header.main_page {
-        let page = zim_file.get_by_url_index(main_page_idx).expect(
-            "failed to get main page",
-        );
+        let page = zim_file
+            .get_by_url_index(main_page_idx)
+            .expect("failed to get main page");
         println!("  Main page is {}", page.url);
     }
 }
@@ -170,8 +180,8 @@ fn process_target(
     cluster: &mut Option<Cluster>,
     root_output: &Path,
     entry: &DirectoryEntry,
-    flatten_link: bool,
     skip_link: bool,
+    tx: &mpsc::Sender<(PathBuf, PathBuf)>,
 ) {
     let dst = make_path(root_output, entry.namespace, &entry.url);
 
@@ -181,41 +191,36 @@ fn process_target(
     }
 
     match entry.target.as_ref().unwrap() {
-        Target::Cluster(_, bid) => {
+        &Target::Cluster(_, bid) => {
             let mut cluster = cluster.as_mut().unwrap();
-            let blob = cluster.get_blob(*bid).expect("failed to get blob");
+            let blob = cluster.get_blob(bid).expect("failed to get blob");
 
             safe_write(&dst, blob, 1);
         }
-        Target::Redirect(redir) => {
+        &Target::Redirect(redir) => {
             if !skip_link && !dst.exists() {
                 let entry = {
                     // let zim_file = zim_file.lock().expect("failed to get zim_file lock");
-                    zim_file.get_by_url_index(*redir).expect(
-                        "failed to get_by_url_index",
-                    )
+                    zim_file
+                        .get_by_url_index(redir)
+                        .expect("failed to get_by_url_index")
                 };
                 // let redir = Arc::new(&entry);
-
                 let src = make_path(root_output, entry.namespace, &entry.url);
-
-                if flatten_link {
-                    if src.exists() {
-                        std::fs::copy(src, dst).expect("failed to copy");
-                    } else {
-                        process_target(
-                            zim_file,
-                            cluster,
-                            root_output,
-                            &entry, //redir.clone(),
-                            flatten_link,
-                            skip_link,
-                        );
-                    }
-                } else {
-                    std::fs::hard_link(src, dst).expect("failed to create link");
-                }
+                tx.send((src, dst)).expect("couldn't send");
             }
+        }
+    }
+}
+
+fn make_link(src: PathBuf, dst: PathBuf, flatten_link: bool) {
+    if !src.exists() {
+        println!("Link source doesn't exist: {}", src.display());
+    } else if !dst.exists() {
+        if flatten_link {
+            std::fs::copy(src, dst).expect("failed to copy");
+        } else {
+            std::fs::hard_link(src, dst).expect("failed to create link");
         }
     }
 }
