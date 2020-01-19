@@ -2,7 +2,16 @@
 name = "zim"
 version = "0.1.0"
 authors = ["Friedel Ziegelmayer <dignifiedquire@gmail.com>", "Andrew Chin <achin@eminence32.net>"]
+documentation = "https://docs.rs/zim/"
+repository = "https://github.com/dignifiedquire/zim"
+homepage = "https://github.com/dignifiedquire/zim"
+description = "ZIM reading and extraction"
+readme = "README.md"
+license = "Apache-2.0/MIT"
 edition = "2018"
+
+keywords = ["parser", "zim"]
+categories = ["encoding", "parser-implementations"]
 
 [dependencies]
 byteorder = "^1.2"
