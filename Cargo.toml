@@ -18,8 +18,6 @@ num_cpus = "0.2"
 
 [[bin]]
 name = "extract_zim"
-path = "extract_zim.rs"
 
 [[bin]]
 name = "ipfs_link"
-path ="ipfs_link.rs"

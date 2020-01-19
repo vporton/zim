@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::Cursor;
 use memmap::Mmap;
+use std::io::Cursor;
 
 use std::fs::File;
 use std::io::BufRead;
@@ -9,8 +9,8 @@ use std::path::Path;
 use cluster::Cluster;
 use directory_entry::DirectoryEntry;
 use directory_iterator::DirectoryIterator;
+use errors::{Error, Result};
 use mime_type::MimeType;
-use errors::{Result, Error};
 
 /// Magic number to recognise the file format, must be 72173914
 pub const ZIM_MAGIC_NUMBER: u32 = 72173914;
@@ -25,7 +25,7 @@ pub struct Zim {
 
     /// List of mimetypes used in this ZIM archive
     pub mime_table: Vec<String>, // a list of mimetypes
-    pub url_list: Vec<u64>, // a list of offsets
+    pub url_list: Vec<u64>,     // a list of offsets
     pub article_list: Vec<u32>, // a list of indicies into url_list
     pub cluster_list: Vec<u64>, // a list of offsets
 }
@@ -60,7 +60,6 @@ pub struct ZimHeader {
     /// pointer to the geo index (optional). Present if mimeListPos is at least 80.
     pub geo_index_pos: Option<u64>,
 }
-
 
 impl Zim {
     /// Loads a Zim file
@@ -139,7 +138,11 @@ impl Zim {
 }
 
 fn is_defined(val: u32) -> Option<u32> {
-    if val == 0xffffffff { None } else { Some(val) }
+    if val == 0xffffffff {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {

@@ -1,17 +1,17 @@
-extern crate zim;
 extern crate clap;
-extern crate stopwatch;
 extern crate pbr;
+extern crate stopwatch;
+extern crate zim;
 
-use clap::{Arg, App};
-use zim::{Zim, Target};
+use clap::{App, Arg};
+use pbr::MultiBar;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::thread;
 use stopwatch::Stopwatch;
-use pbr::MultiBar;
+use zim::{Target, Zim};
 
 fn main() {
     let matches = App::new("zim-linkr")
@@ -50,7 +50,9 @@ fn main() {
     let mut p1 = mb.create_bar(zim.header.cluster_count as u64);
     let mut p3 = mb.create_bar(zim.header.cluster_count as u64);
 
-    thread::spawn(move || { mb.listen(); });
+    thread::spawn(move || {
+        mb.listen();
+    });
 
     p1.show_message = true;
     p1.message("Building cluster map :");

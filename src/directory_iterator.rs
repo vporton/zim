@@ -1,5 +1,5 @@
-use std;
 use directory_entry::DirectoryEntry;
+use std;
 
 use zim::Zim;
 
@@ -31,9 +31,10 @@ impl<'a> std::iter::Iterator for DirectoryIterator<'a> {
         self.next += 1;
 
         let len = self.zim.master_view.len();
-        let slice = self.zim.master_view.get(
-            dir_entry_ptr..(len - dir_entry_ptr),
-        );
+        let slice = self
+            .zim
+            .master_view
+            .get(dir_entry_ptr..(len - dir_entry_ptr));
         match slice {
             Some(slice) => DirectoryEntry::new(self.zim, slice).ok(),
             None => None,
