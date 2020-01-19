@@ -6,11 +6,6 @@
 //! For more into, see the [OpenZIM website](http://www.openzim.org/wiki/OpenZIM)
 //!
 
-extern crate byteorder;
-extern crate memmap;
-extern crate xz2;
-extern crate bitreader;
-
 mod cluster;
 mod directory_entry;
 mod directory_iterator;
@@ -19,7 +14,8 @@ mod mime_type;
 mod target;
 mod zim;
 
-pub use target::Target;
-pub use zim::Zim;
-pub use cluster::Cluster;
-pub use directory_entry::DirectoryEntry;
+pub use crate::cluster::Cluster;
+pub use crate::directory_entry::DirectoryEntry;
+pub use crate::mime_type::MimeType;
+pub use crate::target::Target;
+pub use crate::zim::Zim;

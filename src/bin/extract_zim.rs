@@ -16,7 +16,7 @@ use clap::{App, Arg};
 use scoped_threadpool::Pool;
 use stopwatch::Stopwatch;
 
-use zim::{Cluster, DirectoryEntry, Target, Zim};
+use zim::{Cluster, DirectoryEntry, MimeType, Target, Zim};
 
 fn main() {
     let matches = App::new("zimextractor")
@@ -28,22 +28,26 @@ fn main() {
                 .long("out")
                 .help("Output directory")
                 .takes_value(true),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("skip-link")
                 .long("skip-link")
                 .help("Skip genrating hard links")
                 .takes_value(false),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("flatten-link")
                 .long("flatten-link")
                 .help("Write files to disk, instead of using hard links")
                 .takes_value(false),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("INPUT")
                 .help("Set the zim file to extract")
                 .required(true)
                 .index(1),
-        ).get_matches();
+        )
+        .get_matches();
 
     let skip_link = matches.is_present("skip-link");
     let flatten_link = matches.is_present("flatten-link");
@@ -57,6 +61,8 @@ fn main() {
     let sw = Stopwatch::start_new();
 
     let zim_file = Zim::new(input).expect("failed to parse input");
+
+    ensure_dir(root_output);
 
     // map between cluster and directory entry
     let mut cluster_map = HashMap::new();
@@ -98,7 +104,6 @@ fn main() {
                 } else {
                     Some(zim_file_arc.get_cluster(cid).unwrap())
                 };
-
                 for entry in entries {
                     process_target(
                         zim_file_arc.clone(),
@@ -135,16 +140,12 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
 
     match File::create(&path) {
         Err(why) => {
-            println!("couldn't create {}: {}", display, why.description());
+            eprintln!("couldn't create {}: {}", display, why.description());
 
             if count < 3 {
                 safe_write(path, data, count + 1);
             } else {
-                panic!(
-                    "failed retry: couldn't create {}: {}",
-                    display,
-                    why.description()
-                );
+                panic!("failed retry: couldn't create {}: {:?}", display, why,);
             }
         }
         Ok(file) => {
@@ -158,6 +159,11 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
 }
 
 fn ensure_dir(path: &Path) {
+    if path.exists() {
+        // already done
+        return;
+    }
+
     match std::fs::create_dir_all(path) {
         Err(e) => {
             use std::io::ErrorKind::*;
@@ -183,16 +189,16 @@ fn process_target(
     skip_link: bool,
     tx: &mpsc::Sender<(PathBuf, PathBuf)>,
 ) {
-    let dst = make_path(root_output, entry.namespace, &entry.url);
+    let dst = make_path(root_output, entry.namespace, &entry.url, &entry.mime_type);
 
     if entry.target.is_none() {
         println!("skipping missing target {:?} {:?}", dst, entry);
-        return ();
+        return;
     }
 
     match entry.target.as_ref().unwrap() {
         &Target::Cluster(_, bid) => {
-            let mut cluster = cluster.as_mut().unwrap();
+            let cluster = cluster.as_mut().unwrap();
             let blob = cluster.get_blob(bid).expect("failed to get blob");
 
             safe_write(&dst, blob, 1);
@@ -200,13 +206,11 @@ fn process_target(
         &Target::Redirect(redir) => {
             if !skip_link && !dst.exists() {
                 let entry = {
-                    // let zim_file = zim_file.lock().expect("failed to get zim_file lock");
                     zim_file
                         .get_by_url_index(redir)
                         .expect("failed to get_by_url_index")
                 };
-                // let redir = Arc::new(&entry);
-                let src = make_path(root_output, entry.namespace, &entry.url);
+                let src = make_path(root_output, entry.namespace, &entry.url, &entry.mime_type);
                 tx.send((src, dst)).expect("couldn't send");
             }
         }
@@ -225,14 +229,24 @@ fn make_link(src: PathBuf, dst: PathBuf, flatten_link: bool) {
     }
 }
 
-fn make_path(root: &Path, namespace: char, url: &str) -> PathBuf {
+fn make_path(root: &Path, namespace: char, url: &str, mime_type: &MimeType) -> PathBuf {
     let mut s = String::new();
     s.push(namespace);
-    if url.starts_with("/") {
+    let mut path = if url.starts_with("/") {
         // make absolute urls relative to the output folder
         let url = url.replacen("/", "", 1);
         root.join(&s).join(url)
     } else {
         root.join(&s).join(url)
+    };
+
+    if let MimeType::Type(ref typ) = mime_type {
+        if typ == "text/html"
+            && (path.extension().is_none() || path.extension().unwrap().is_empty())
+        {
+            path.set_extension("html");
+        }
     }
+
+    path
 }

@@ -1,6 +1,6 @@
+use bitreader;
 use std;
 use std::fmt;
-use bitreader;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -14,7 +14,7 @@ pub enum Error {
     InvalidClusterExtension,
     MissingBlobList,
     OutOfBounds,
-    ParsingError(Box<std::error::Error + Send + Sync>),
+    ParsingError(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl fmt::Display for Error {
@@ -39,7 +39,7 @@ impl std::error::Error for Error {
     }
 
     #[inline]
-    fn cause(&self) -> Option<&std::error::Error> {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
         match *self {
             Error::ParsingError(ref err) => Some(&**err),
             _ => None,

@@ -1,14 +1,16 @@
+use std::fmt;
 use std::io::Cursor;
 use std::io::Read;
 
-use byteorder::{LittleEndian, ReadBytesExt};
-use xz2::read::XzDecoder;
 use bitreader::BitReader;
+use byteorder::{LittleEndian, ReadBytesExt};
 use memmap::Mmap;
+use xz2::read::XzDecoder;
 
-use errors::{Result, Error};
+use crate::errors::{Error, Result};
 
 #[repr(u8)]
+#[derive(Debug)]
 pub enum Compression {
     None = 0,
     LZMA2 = 4,
@@ -47,6 +49,24 @@ pub struct Cluster<'a> {
     decompressed: Option<Vec<u8>>,
 }
 
+impl<'a> fmt::Debug for Cluster<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cluster")
+            .field("extended", &self.extended)
+            .field("compression", &self.compression)
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("size", &self.size)
+            .field("view len", &self.view.len())
+            .field("blob_list", &self.blob_list)
+            .field(
+                "decompressed len",
+                &self.decompressed.as_ref().map(|s| s.len()),
+            )
+            .finish()
+    }
+}
+
 impl<'a> Cluster<'a> {
     pub fn new(
         master_view: &'a Mmap,
@@ -65,9 +85,9 @@ impl<'a> Cluster<'a> {
 
         assert!(end > start);
         let cluster_size = end - start;
-        let cluster_view = master_view.get(start as usize..end as usize).ok_or(
-            Error::OutOfBounds,
-        )?;
+        let cluster_view = master_view
+            .get(start as usize..end as usize)
+            .ok_or(Error::OutOfBounds)?;
 
         let (extended, compression) =
             parse_details(cluster_view.get(0).ok_or(Error::OutOfBounds)?)?;
@@ -94,7 +114,7 @@ impl<'a> Cluster<'a> {
             Compression::LZMA2 => {
                 if self.decompressed.is_none() {
                     let mut decoder = XzDecoder::new(&self.view[1..]);
-                    let mut d = Vec::new();
+                    let mut d = Vec::with_capacity(self.view.len());
                     decoder.read_to_end(&mut d)?;
                     self.decompressed = Some(d);
                 }
@@ -107,11 +127,11 @@ impl<'a> Cluster<'a> {
             None => {
                 let blob_list = match self.compression {
                     Compression::LZMA2 => {
-                        let mut cur = Cursor::new(self.decompressed.as_ref().unwrap());
+                        let cur = Cursor::new(self.decompressed.as_ref().unwrap());
                         parse_blob_list(cur, self.extended)?
                     }
                     Compression::None => {
-                        let mut cur = Cursor::new(&self.view[1..]);
+                        let cur = Cursor::new(&self.view[1..]);
                         parse_blob_list(cur, self.extended)?
                     }
                 };
@@ -157,10 +177,7 @@ fn parse_details(details: &u8) -> Result<(bool, Compression)> {
     // extended mode is the 4th byte from the left
     // compression are the last four bytes
 
-    Ok((
-        reader.read_bool()?,
-        Compression::from(reader.read_u8(4)?)?,
-    ))
+    Ok((reader.read_bool()?, Compression::from(reader.read_u8(4)?)?))
 }
 
 fn parse_blob_list<T: ReadBytesExt>(mut cur: T, extended: bool) -> Result<Vec<u64>> {

@@ -1,13 +1,13 @@
 use std;
-use std::io::Cursor;
 use std::io::BufRead;
+use std::io::Cursor;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use target::Target;
-use mime_type::MimeType;
-use errors::{Error, Result};
-use zim::Zim;
+use crate::errors::{Error, Result};
+use crate::mime_type::MimeType;
+use crate::target::Target;
+use crate::zim::Zim;
 
 /// Holds metadata about an article
 #[derive(Debug)]
@@ -59,7 +59,6 @@ impl DirectoryEntry {
             vec.truncate(size - 1);
             String::from_utf8(vec)?
         };
-
 
         Ok(DirectoryEntry {
             mime_type: mime_type,
