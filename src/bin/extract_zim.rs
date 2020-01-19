@@ -104,7 +104,6 @@ fn main() {
                 } else {
                     Some(zim_file_arc.get_cluster(cid).unwrap())
                 };
-
                 for entry in entries {
                     process_target(
                         zim_file_arc.clone(),
@@ -139,10 +138,6 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
 
     ensure_dir(contain_path);
 
-    if path.exists() {
-        return;
-    }
-
     match File::create(&path) {
         Err(why) => {
             eprintln!("couldn't create {}: {}", display, why.description());
@@ -164,6 +159,11 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
 }
 
 fn ensure_dir(path: &Path) {
+    if path.exists() {
+        // already done
+        return;
+    }
+
     match std::fs::create_dir_all(path) {
         Err(e) => {
             use std::io::ErrorKind::*;
@@ -193,7 +193,7 @@ fn process_target(
 
     if entry.target.is_none() {
         println!("skipping missing target {:?} {:?}", dst, entry);
-        return ();
+        return;
     }
 
     match entry.target.as_ref().unwrap() {
@@ -241,7 +241,9 @@ fn make_path(root: &Path, namespace: char, url: &str, mime_type: &MimeType) -> P
     };
 
     if let MimeType::Type(ref typ) = mime_type {
-        if typ == "text/html" && path.extension().is_none() {
+        if typ == "text/html"
+            && (path.extension().is_none() || path.extension().unwrap().is_empty())
+        {
             path.set_extension("html");
         }
     }

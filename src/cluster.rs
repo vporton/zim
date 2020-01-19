@@ -114,7 +114,7 @@ impl<'a> Cluster<'a> {
             Compression::LZMA2 => {
                 if self.decompressed.is_none() {
                     let mut decoder = XzDecoder::new(&self.view[1..]);
-                    let mut d = Vec::new();
+                    let mut d = Vec::with_capacity(self.view.len());
                     decoder.read_to_end(&mut d)?;
                     self.decompressed = Some(d);
                 }

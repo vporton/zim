@@ -6,11 +6,6 @@
 //! For more into, see the [OpenZIM website](http://www.openzim.org/wiki/OpenZIM)
 //!
 
-extern crate bitreader;
-extern crate byteorder;
-extern crate memmap;
-extern crate xz2;
-
 mod cluster;
 mod directory_entry;
 mod directory_iterator;
