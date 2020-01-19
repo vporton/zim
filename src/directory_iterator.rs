@@ -1,7 +1,7 @@
-use directory_entry::DirectoryEntry;
+use crate::directory_entry::DirectoryEntry;
 use std;
 
-use zim::Zim;
+use crate::zim::Zim;
 
 pub struct DirectoryIterator<'a> {
     max: u32,

@@ -7,7 +7,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use memmap::Mmap;
 use xz2::read::XzDecoder;
 
-use errors::{Error, Result};
+use crate::errors::{Error, Result};
 
 #[repr(u8)]
 #[derive(Debug)]

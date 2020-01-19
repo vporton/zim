@@ -6,11 +6,11 @@ use std::fs::File;
 use std::io::BufRead;
 use std::path::Path;
 
-use cluster::Cluster;
-use directory_entry::DirectoryEntry;
-use directory_iterator::DirectoryIterator;
-use errors::{Error, Result};
-use mime_type::MimeType;
+use crate::cluster::Cluster;
+use crate::directory_entry::DirectoryEntry;
+use crate::directory_iterator::DirectoryIterator;
+use crate::errors::{Error, Result};
+use crate::mime_type::MimeType;
 
 /// Magic number to recognise the file format, must be 72173914
 pub const ZIM_MAGIC_NUMBER: u32 = 72173914;

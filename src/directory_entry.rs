@@ -4,10 +4,10 @@ use std::io::Cursor;
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use errors::{Error, Result};
-use mime_type::MimeType;
-use target::Target;
-use zim::Zim;
+use crate::errors::{Error, Result};
+use crate::mime_type::MimeType;
+use crate::target::Target;
+use crate::zim::Zim;
 
 /// Holds metadata about an article
 #[derive(Debug)]

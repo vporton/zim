@@ -2,7 +2,7 @@
 name = "zim"
 version = "0.1.0"
 authors = ["Friedel Ziegelmayer <dignifiedquire@gmail.com>", "Andrew Chin <achin@eminence32.net>"]
-
+edition = "2018"
 
 [dependencies]
 byteorder = "^1.2"

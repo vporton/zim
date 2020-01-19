@@ -19,8 +19,8 @@ mod mime_type;
 mod target;
 mod zim;
 
-pub use cluster::Cluster;
-pub use directory_entry::DirectoryEntry;
-pub use mime_type::MimeType;
-pub use target::Target;
-pub use zim::Zim;
+pub use crate::cluster::Cluster;
+pub use crate::directory_entry::DirectoryEntry;
+pub use crate::mime_type::MimeType;
+pub use crate::target::Target;
+pub use crate::zim::Zim;
