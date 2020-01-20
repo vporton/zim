@@ -11,6 +11,7 @@ pub enum Error {
     InvalidMagicNumber,
     InvalidVersion,
     InvalidHeader,
+    InvalidNamespace,
     InvalidClusterExtension,
     MissingBlobList,
     OutOfBounds,
@@ -35,6 +36,7 @@ impl std::error::Error for Error {
             Error::MissingBlobList => "cluster is missing a blob list",
             Error::OutOfBounds => "out of bounds access",
             Error::ParsingError(_) => "failed to parse",
+            Error::InvalidNamespace => "invalid namespace",
         }
     }
 

@@ -16,7 +16,7 @@ use clap::{App, Arg};
 use scoped_threadpool::Pool;
 use stopwatch::Stopwatch;
 
-use zim::{Cluster, DirectoryEntry, MimeType, Target, Zim};
+use zim::{Cluster, DirectoryEntry, MimeType, Namespace, Target, Zim};
 
 fn main() {
     let matches = App::new("zimextractor")
@@ -229,9 +229,9 @@ fn make_link(src: PathBuf, dst: PathBuf, flatten_link: bool) {
     }
 }
 
-fn make_path(root: &Path, namespace: char, url: &str, mime_type: &MimeType) -> PathBuf {
+fn make_path(root: &Path, namespace: Namespace, url: &str, mime_type: &MimeType) -> PathBuf {
     let mut s = String::new();
-    s.push(namespace);
+    s.push(namespace as u8 as char);
     let mut path = if url.starts_with("/") {
         // make absolute urls relative to the output folder
         let url = url.replacen("/", "", 1);

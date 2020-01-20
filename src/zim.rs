@@ -223,6 +223,8 @@ fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {
     ))
 }
 
+/// Parses the URL Pointer List.
+/// See https://wiki.openzim.org/wiki/ZIM_file_format#URL_Pointer_List_.28urlPtrPos.29
 fn parse_url_list(master_view: &Mmap, ptr_pos: u64, count: u32) -> Result<Vec<u64>> {
     let start = ptr_pos as usize;
     let end = (ptr_pos + count as u64 * 8) as usize;

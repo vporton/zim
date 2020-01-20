@@ -11,11 +11,13 @@ mod directory_entry;
 mod directory_iterator;
 mod errors;
 mod mime_type;
+mod namespace;
 mod target;
 mod zim;
 
 pub use crate::cluster::Cluster;
 pub use crate::directory_entry::DirectoryEntry;
 pub use crate::mime_type::MimeType;
+pub use crate::namespace::Namespace;
 pub use crate::target::Target;
 pub use crate::zim::Zim;

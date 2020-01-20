@@ -78,11 +78,11 @@ fn main() {
             let redir = zim.get_by_url_index(redir).unwrap();
 
             let mut s = String::new();
-            s.push(redir.namespace);
+            s.push(redir.namespace as u8 as char);
             let src = root_output.join(&s).join(&redir.url);
 
             let mut d = String::new();
-            d.push(entry.namespace);
+            d.push(entry.namespace as u8 as char);
             let dst = root_output.join(&s).join(&entry.url);
 
             if src != dst {

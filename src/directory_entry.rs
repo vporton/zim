@@ -1,4 +1,5 @@
 use std;
+use std::convert::TryFrom;
 use std::io::BufRead;
 use std::io::Cursor;
 
@@ -6,6 +7,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::errors::{Error, Result};
 use crate::mime_type::MimeType;
+use crate::namespace::Namespace;
 use crate::target::Target;
 use crate::zim::Zim;
 
@@ -15,7 +17,7 @@ pub struct DirectoryEntry {
     /// MIME type number as defined in the MIME type list
     pub mime_type: MimeType,
     /// defines to which namespace this directory entry belongs
-    pub namespace: char,
+    pub namespace: Namespace,
     /// identifies a revision of the contents of this directory entry, needed to identify
     /// updates or revisions in the original history
     pub revision: Option<u32>,
@@ -62,7 +64,7 @@ impl DirectoryEntry {
 
         Ok(DirectoryEntry {
             mime_type: mime_type,
-            namespace: std::char::from_u32(namespace as u32).unwrap(),
+            namespace: Namespace::try_from(namespace)?,
             revision: rev,
             url: url,
             title: title,
