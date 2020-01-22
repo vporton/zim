@@ -14,6 +14,8 @@ pub enum Error {
     InvalidNamespace,
     InvalidClusterExtension,
     MissingBlobList,
+    MissingChecksum,
+    InvalidChecksum,
     OutOfBounds,
     ParsingError(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -37,6 +39,8 @@ impl std::error::Error for Error {
             Error::OutOfBounds => "out of bounds access",
             Error::ParsingError(_) => "failed to parse",
             Error::InvalidNamespace => "invalid namespace",
+            Error::MissingChecksum => "missing checksum",
+            Error::InvalidChecksum => "invalid checksum",
         }
     }
 

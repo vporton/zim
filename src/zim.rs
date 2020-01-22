@@ -1,10 +1,11 @@
-use byteorder::{LittleEndian, ReadBytesExt};
-use memmap::Mmap;
-use std::io::Cursor;
-
 use std::fs::File;
-use std::io::BufRead;
-use std::path::Path;
+use std::io::Cursor;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+
+use byteorder::{LittleEndian, ReadBytesExt};
+use md5::{digest::generic_array::GenericArray, Digest, Md5};
+use memmap::Mmap;
 
 use crate::cluster::Cluster;
 use crate::directory_entry::DirectoryEntry;
@@ -22,13 +23,20 @@ pub struct Zim {
     pub header: ZimHeader,
 
     pub master_view: Mmap,
+    /// The path to the file.
+    pub file_path: PathBuf,
 
     /// List of mimetypes used in this ZIM archive
     pub mime_table: Vec<String>, // a list of mimetypes
     pub url_list: Vec<u64>,     // a list of offsets
     pub article_list: Vec<u32>, // a list of indicies into url_list
     pub cluster_list: Vec<u64>, // a list of offsets
+
+    /// MD5 checksum.
+    pub checksum: Checksum,
 }
+
+pub type Checksum = GenericArray<u8, <Md5 as Digest>::OutputSize>;
 
 /// A ZIM file starts with a header.
 pub struct ZimHeader {
@@ -67,7 +75,7 @@ impl Zim {
     /// Loads a Zim file and parses the header, and the url, title, and cluster offset tables.  The
     /// rest of the data isn't parsed until it's needed, so this should be fairly quick.
     pub fn new<P: AsRef<Path>>(p: P) -> Result<Zim> {
-        let f = File::open(p)?;
+        let f = File::open(p.as_ref())?;
         let master_view = unsafe { Mmap::map(&f)? };
 
         let (header, mime_table) = parse_header(&master_view)?;
@@ -79,14 +87,35 @@ impl Zim {
         let cluster_list =
             parse_cluster_list(&master_view, header.cluster_ptr_pos, header.cluster_count)?;
 
+        let checksum = read_checksum(&master_view, header.checksum_pos)?;
+
         Ok(Zim {
-            header: header,
-            master_view: master_view,
-            mime_table: mime_table,
-            url_list: url_list,
-            article_list: article_list,
-            cluster_list: cluster_list,
+            header,
+            file_path: p.as_ref().into(),
+            master_view,
+            mime_table,
+            url_list,
+            article_list,
+            cluster_list,
+            checksum,
         })
+    }
+
+    /// Get the number of articles.
+    pub fn article_count(&self) -> usize {
+        self.article_list.len()
+    }
+
+    /// Computes the checksum, and returns an error if it does not match the one in
+    /// the file.
+    pub fn verify_checksum(&self) -> Result<()> {
+        let checksum_computed = compute_checksum(&self.file_path, self.header.checksum_pos)?;
+
+        if self.checksum != checksum_computed {
+            return Err(Error::InvalidChecksum);
+        }
+
+        Ok(())
     }
 
     /// Indexes into the ZIM mime_table.
@@ -265,6 +294,38 @@ fn parse_cluster_list(master_view: &Mmap, ptr_pos: u64, count: u32) -> Result<Ve
         out.push(cluster_cur.read_u64::<LittleEndian>()?);
     }
     Ok(out)
+}
+
+/// Read out the the 16 byte long MD5 checksum.
+fn read_checksum(master_view: &Mmap, checksum_pos: u64) -> Result<Checksum> {
+    match master_view.get(checksum_pos as usize..checksum_pos as usize + 16) {
+        Some(raw) => {
+            let mut arr = GenericArray::default();
+            arr.copy_from_slice(raw);
+
+            Ok(arr)
+        }
+        None => Err(Error::MissingChecksum),
+    }
+}
+
+/// Compute the MD5 checksum of the file.
+fn compute_checksum(path: &Path, checksum_pos: u64) -> Result<Checksum> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file.take(checksum_pos));
+    let mut buffer = vec![0u8; 1024];
+    let mut hasher = Md5::new();
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+
+        hasher.input(&buffer[..read]);
+    }
+
+    Ok(hasher.result())
 }
 
 #[test]

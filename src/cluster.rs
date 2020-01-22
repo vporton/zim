@@ -168,14 +168,23 @@ impl<'a> Cluster<'a> {
     }
 }
 
+/// Parses the cluster information.
+///
+/// Fourth low bits:
+///   - 0: default (no compression),
+///   - 1: none (inherited from Zeno),
+///   - 4: LZMA2 compressed
+/// Firth bits :
+///   - 0: normal (OFFSET_SIZE=4)
+///   - 1: extended (OFFSET_SIZE=8)
 fn parse_details(details: &u8) -> Result<(bool, Compression)> {
     let slice = &[*details];
     let mut reader = BitReader::new(slice);
-    // skip first three bytes
+    // skip first three bits
     reader.skip(3)?;
 
-    // extended mode is the 4th byte from the left
-    // compression are the last four bytes
+    // extended mode is the 4th bits from the left
+    // compression are the last four bits
 
     Ok((reader.read_bool()?, Compression::from(reader.read_u8(4)?)?))
 }

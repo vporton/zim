@@ -24,9 +24,15 @@ crossbeam = "^0.7"
 bitreader = "^0.3"
 scoped_threadpool = "^0.1"
 num_cpus = "1.12"
+md-5 = "0.8.0"
+hex = "0.4.0"
 
 [[bin]]
 name = "extract_zim"
 
 [[bin]]
 name = "ipfs_link"
+
+[[bin]]
+name = "zim-info"
+path = "src/bin/zim_info.rs"
