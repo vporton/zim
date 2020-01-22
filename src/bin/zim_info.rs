@@ -22,6 +22,7 @@ fn main() {
 
     let zim_file = Zim::new(input).expect("failed to parse input");
 
+    println!("UUID: {}", &zim_file.header.uuid);
     println!("Article Count: {}", zim_file.article_count());
     println!("Mime List Pos: {}", zim_file.header.mime_list_pos);
     println!("URL Pointer Pos: {}", zim_file.header.url_ptr_pos);

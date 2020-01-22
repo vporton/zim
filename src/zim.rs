@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs::File;
 use std::io::Cursor;
 use std::io::{BufRead, BufReader, Read};
@@ -45,7 +46,7 @@ pub struct ZimHeader {
     /// Minor version
     pub version_minor: u16,
     /// unique id of this zim file
-    pub uuid: [u64; 2],
+    pub uuid: Uuid,
     /// total number of articles
     pub article_count: u32,
     /// total number of clusters
@@ -67,6 +68,59 @@ pub struct ZimHeader {
     pub checksum_pos: u64,
     /// pointer to the geo index (optional). Present if mimeListPos is at least 80.
     pub geo_index_pos: Option<u64>,
+}
+
+const HEX: &[u8] = b"0123456789abcdef";
+
+#[derive(Debug)]
+pub struct Uuid([u8; 16]);
+
+impl Uuid {
+    pub fn new(uuid: [u8; 16]) -> Self {
+        Uuid(uuid)
+    }
+
+    fn hi(&self, i: usize) -> u8 {
+        HEX[((self.0[i] >> 4) & 0xF) as usize]
+    }
+
+    fn lo(&self, i: usize) -> u8 {
+        HEX[(self.0[i] & 0xF) as usize]
+    }
+}
+
+impl fmt::Display for Uuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let print_index = |f: &mut fmt::Formatter<'_>, k: usize| {
+            // hi
+            f.write_str(&(self.hi(k) as char).to_string())?;
+            // lo
+            f.write_str(&(self.lo(k) as char).to_string())?;
+            Ok(())
+        };
+
+        for i in 0..4 {
+            print_index(f, i)?;
+        }
+        f.write_str("-")?;
+        for i in 4..6 {
+            print_index(f, i)?;
+        }
+        f.write_str("-")?;
+        for i in 6..8 {
+            print_index(f, i)?;
+        }
+        f.write_str("-")?;
+        for i in 8..10 {
+            print_index(f, i)?;
+        }
+        f.write_str("-")?;
+        for i in 10..16 {
+            print_index(f, i)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Zim {
@@ -190,10 +244,11 @@ fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {
 
     let version_minor = header_cur.read_u16::<LittleEndian>()?;
 
-    let uuid = [
-        header_cur.read_u64::<LittleEndian>()?,
-        header_cur.read_u64::<LittleEndian>()?,
-    ];
+    let mut uuid = [0u8; 16];
+    for i in 0..16 {
+        uuid[i] = header_cur.read_u8()?;
+    }
+
     let article_count = header_cur.read_u32::<LittleEndian>()?;
     let cluster_count = header_cur.read_u32::<LittleEndian>()?;
     let url_ptr_pos = header_cur.read_u64::<LittleEndian>()?;
@@ -234,19 +289,19 @@ fn parse_header(master_view: &Mmap) -> Result<(ZimHeader, Vec<String>)> {
 
     Ok((
         ZimHeader {
-            version_major: version_major,
-            version_minor: version_minor,
-            uuid: uuid,
-            article_count: article_count,
-            cluster_count: cluster_count,
-            url_ptr_pos: url_ptr_pos,
-            title_ptr_pos: title_ptr_pos,
-            cluster_ptr_pos: cluster_ptr_pos,
-            mime_list_pos: mime_list_pos,
+            version_major,
+            version_minor,
+            uuid: Uuid::new(uuid),
+            article_count,
+            cluster_count,
+            url_ptr_pos,
+            title_ptr_pos,
+            cluster_ptr_pos,
+            mime_list_pos,
             main_page: is_defined(main_page),
             layout_page: is_defined(layout_page),
-            checksum_pos: checksum_pos,
-            geo_index_pos: geo_index_pos,
+            checksum_pos,
+            geo_index_pos,
         },
         mime_table,
     ))
