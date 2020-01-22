@@ -1,4 +1,3 @@
-use std::fmt;
 use std::fs::File;
 use std::io::Cursor;
 use std::io::{BufRead, BufReader, Read};
@@ -13,6 +12,7 @@ use crate::directory_entry::DirectoryEntry;
 use crate::directory_iterator::DirectoryIterator;
 use crate::errors::{Error, Result};
 use crate::mime_type::MimeType;
+use crate::uuid::Uuid;
 
 /// Magic number to recognise the file format, must be 72173914
 pub const ZIM_MAGIC_NUMBER: u32 = 72173914;
@@ -68,59 +68,6 @@ pub struct ZimHeader {
     pub checksum_pos: u64,
     /// pointer to the geo index (optional). Present if mimeListPos is at least 80.
     pub geo_index_pos: Option<u64>,
-}
-
-const HEX: &[u8] = b"0123456789abcdef";
-
-#[derive(Debug)]
-pub struct Uuid([u8; 16]);
-
-impl Uuid {
-    pub fn new(uuid: [u8; 16]) -> Self {
-        Uuid(uuid)
-    }
-
-    fn hi(&self, i: usize) -> u8 {
-        HEX[((self.0[i] >> 4) & 0xF) as usize]
-    }
-
-    fn lo(&self, i: usize) -> u8 {
-        HEX[(self.0[i] & 0xF) as usize]
-    }
-}
-
-impl fmt::Display for Uuid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let print_index = |f: &mut fmt::Formatter<'_>, k: usize| {
-            // hi
-            f.write_str(&(self.hi(k) as char).to_string())?;
-            // lo
-            f.write_str(&(self.lo(k) as char).to_string())?;
-            Ok(())
-        };
-
-        for i in 0..4 {
-            print_index(f, i)?;
-        }
-        f.write_str("-")?;
-        for i in 4..6 {
-            print_index(f, i)?;
-        }
-        f.write_str("-")?;
-        for i in 6..8 {
-            print_index(f, i)?;
-        }
-        f.write_str("-")?;
-        for i in 8..10 {
-            print_index(f, i)?;
-        }
-        f.write_str("-")?;
-        for i in 10..16 {
-            print_index(f, i)?;
-        }
-
-        Ok(())
-    }
 }
 
 impl Zim {
