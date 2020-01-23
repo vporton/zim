@@ -6,6 +6,9 @@
 //! For more into, see the [OpenZIM website](http://www.openzim.org/wiki/OpenZIM)
 //!
 
+#[macro_use]
+extern crate rental;
+
 mod cluster;
 mod directory_entry;
 mod directory_iterator;

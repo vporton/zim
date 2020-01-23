@@ -335,10 +335,10 @@ fn test_zim() {
     let zim = Zim::new("fixtures/wikipedia_ab_all_2017-03.zim").expect("failed to parse fixture");
 
     assert_eq!(zim.header.version_major, 5);
-    let mut cl0 = zim.get_cluster(0).unwrap();
-    assert_eq!(cl0.get_blob(0).unwrap(), &[97, 98, 107]);
+    let cl0 = zim.get_cluster(0).unwrap();
+    assert_eq!(&cl0.get_blob(0).unwrap()[..], &[97, 98, 107][..]);
 
-    let mut cl1 = zim.get_cluster(zim.header.cluster_count - 1).unwrap();
+    let cl1 = zim.get_cluster(zim.header.cluster_count - 1).unwrap();
     let b = cl1.get_blob(0).unwrap();
     assert_eq!(&b[0..10], &[71, 73, 70, 56, 57, 97, 44, 1, 150, 0]);
     assert_eq!(

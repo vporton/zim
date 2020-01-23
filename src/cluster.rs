@@ -1,6 +1,7 @@
 use std::fmt;
 use std::io::Cursor;
 use std::io::Read;
+use std::sync::{Arc, RwLock};
 
 use bitreader::BitReader;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -10,7 +11,7 @@ use xz2::read::XzDecoder;
 use crate::errors::{Error, Result};
 
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Compression {
     None = 0,
     LZMA2 = 4,
@@ -37,8 +38,10 @@ impl Compression {
 ///
 /// Within an ZIM archive, clusters contain several blobs of data that are all compressed together.
 /// Each blob is the data for an article.
-#[allow(dead_code)]
-pub struct Cluster<'a> {
+#[derive(Clone)]
+pub struct Cluster<'a>(Arc<RwLock<InnerCluster<'a>>>);
+
+pub struct InnerCluster<'a> {
     extended: bool,
     compression: Compression,
     start: u64,
@@ -51,17 +54,18 @@ pub struct Cluster<'a> {
 
 impl<'a> fmt::Debug for Cluster<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let raw = self.0.read().unwrap();
         f.debug_struct("Cluster")
-            .field("extended", &self.extended)
-            .field("compression", &self.compression)
-            .field("start", &self.start)
-            .field("end", &self.end)
-            .field("size", &self.size)
-            .field("view len", &self.view.len())
-            .field("blob_list", &self.blob_list)
+            .field("extended", &raw.extended)
+            .field("compression", &raw.compression)
+            .field("start", &raw.start)
+            .field("end", &raw.end)
+            .field("size", &raw.size)
+            .field("view len", &raw.view.len())
+            .field("blob_list", &raw.blob_list)
             .field(
                 "decompressed len",
-                &self.decompressed.as_ref().map(|s| s.len()),
+                &raw.decompressed.as_ref().map(|s| s.len()),
             )
             .finish()
     }
@@ -75,6 +79,58 @@ impl<'a> Cluster<'a> {
         checksum_pos: u64,
         version: u16,
     ) -> Result<Cluster<'a>> {
+        Ok(Cluster(Arc::new(RwLock::new(InnerCluster::new(
+            master_view,
+            cluster_list,
+            idx,
+            checksum_pos,
+            version,
+        )?))))
+    }
+
+    pub fn decompress(&self) -> Result<()> {
+        self.0.write().unwrap().decompress()
+    }
+
+    pub fn get_blob<'b: 'a>(&'b self, idx: u32) -> Result<Blob<'a, 'b>> {
+        {
+            let lock = self.0.read().unwrap();
+            if lock.needs_decompression() {
+                drop(lock);
+                self.0.write().unwrap().decompress()?;
+            }
+        }
+
+        match Blob::try_new(self.0.read().unwrap(), |lock| lock.get_blob(idx)) {
+            Ok(blob) => Ok(blob),
+            Err(rental::RentalError(err, _)) => Err(err),
+        }
+    }
+}
+
+rental! {
+    pub mod rents {
+        use super::*;
+
+        #[rental(deref_suffix)]
+        pub struct Blob<'a, 'b>  {
+            #[target_ty = "InnerCluster<'a>"]
+            guard: std::sync::RwLockReadGuard<'b, InnerCluster<'a>>,
+            slice: &'guard [u8],
+        }
+    }
+}
+
+use rents::*;
+
+impl<'a> InnerCluster<'a> {
+    fn new(
+        master_view: &'a Mmap,
+        cluster_list: &'a Vec<u64>,
+        idx: u32,
+        checksum_pos: u64,
+        version: u16,
+    ) -> Result<Self> {
         let idx = idx as usize;
         let start = cluster_list[idx];
         let end = if idx < cluster_list.len() - 1 {
@@ -97,7 +153,14 @@ impl<'a> Cluster<'a> {
             return Err(Error::InvalidClusterExtension);
         }
 
-        Ok(Cluster {
+        let blob_list = if Compression::None == compression {
+            let cur = Cursor::new(&cluster_view[1..]);
+            Some(parse_blob_list(cur, extended)?)
+        } else {
+            None
+        };
+
+        Ok(Self {
             extended: extended,
             compression: compression,
             start: start,
@@ -105,11 +168,18 @@ impl<'a> Cluster<'a> {
             size: cluster_size,
             view: cluster_view,
             decompressed: None,
-            blob_list: None,
+            blob_list,
         })
     }
 
-    pub fn decompress(&mut self) -> Result<()> {
+    fn needs_decompression(&self) -> bool {
+        match self.compression {
+            Compression::LZMA2 => self.decompressed.is_none() || self.blob_list.is_none(),
+            Compression::None => false,
+        }
+    }
+
+    fn decompress(&mut self) -> Result<()> {
         match self.compression {
             Compression::LZMA2 => {
                 if self.decompressed.is_none() {
@@ -122,29 +192,21 @@ impl<'a> Cluster<'a> {
             Compression::None => {}
         }
 
-        match self.blob_list {
-            Some(_) => {}
-            None => {
-                let blob_list = match self.compression {
-                    Compression::LZMA2 => {
-                        let cur = Cursor::new(self.decompressed.as_ref().unwrap());
-                        parse_blob_list(cur, self.extended)?
-                    }
-                    Compression::None => {
-                        let cur = Cursor::new(&self.view[1..]);
-                        parse_blob_list(cur, self.extended)?
-                    }
-                };
-                self.blob_list = Some(blob_list);
+        if self.blob_list.is_none() {
+            match self.compression {
+                Compression::LZMA2 => {
+                    let cur = Cursor::new(self.decompressed.as_ref().unwrap());
+                    let blob_list = parse_blob_list(cur, self.extended)?;
+                    self.blob_list = Some(blob_list);
+                }
+                Compression::None => {}
             }
         }
 
         Ok(())
     }
 
-    pub fn get_blob(&mut self, idx: u32) -> Result<&[u8]> {
-        self.decompress()?;
-
+    fn get_blob<'b>(&'b self, idx: u32) -> Result<&'b [u8]> {
         match self.blob_list {
             Some(ref list) => {
                 let start = list[idx as usize] as usize;

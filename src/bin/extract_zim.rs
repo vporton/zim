@@ -1,21 +1,13 @@
-extern crate clap;
-extern crate num_cpus;
-extern crate scoped_threadpool;
-extern crate stopwatch;
-extern crate zim;
-
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::sync::Arc;
 
 use clap::{App, Arg};
-use scoped_threadpool::Pool;
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use stopwatch::Stopwatch;
-
 use zim::{Cluster, DirectoryEntry, MimeType, Namespace, Target, Zim};
 
 fn main() {
@@ -57,82 +49,74 @@ fn main() {
     let input = matches.value_of("INPUT").unwrap();
 
     println!("Extracting file: {} to {}\n", input, out);
+    println!("Generating symlinks: {}", !skip_link);
+    println!("Generating copies for links: {}", flatten_link);
 
     let sw = Stopwatch::start_new();
-
     let zim_file = Zim::new(input).expect("failed to parse input");
+
+    if let Some(main_page_idx) = zim_file.header.main_page {
+        let page = zim_file
+            .get_by_url_index(main_page_idx)
+            .expect("failed to get main page");
+        println!("Main page is {}", page.url);
+    }
+    println!("");
+
+    let pb = ProgressBar::new(zim_file.article_count() as u64);
+    let style = ProgressStyle::default_bar()
+        .template(
+            "{msg}\n{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+        )
+        .progress_chars("#>-");
+    pb.set_style(style);
 
     ensure_dir(root_output);
 
     // map between cluster and directory entry
     let mut cluster_map = HashMap::new();
 
-    println!("  Creating map");
-    let link_entry = zim_file.header.cluster_count + 1;
-    for i in zim_file.iterate_by_urls() {
-        if let Some(Target::Cluster(cid, _)) = i.target {
-            cluster_map.entry(cid).or_insert(Vec::new()).push(i);
-        } else if !skip_link {
-            cluster_map.entry(link_entry).or_insert(Vec::new()).push(i);
-        }
+    for i in 0..zim_file.header.cluster_count {
+        let cluster = zim_file.get_cluster(i).expect("failed to retrieve cluster");
+        cluster_map.insert(i, cluster);
     }
 
-    println!("  Extracting entries: {}", zim_file.header.cluster_count);
+    let entries: Vec<_> = zim_file.iterate_by_urls().collect();
+    pb.set_message("Writing entries to disk");
+    entries
+        .par_iter()
+        .filter(|entry| {
+            if let Some(Target::Cluster(_, _)) = entry.target.as_ref() {
+                return true;
+            }
+            false
+        })
+        .for_each(|entry| {
+            process_file(&root_output, &cluster_map, entry, &pb);
+        });
+
     if !skip_link {
-        println!("  Extracting links: {}", cluster_map.get(&0).unwrap().len());
-    }
-
-    let threads = num_cpus::get();
-    println!(
-        "  Spawning {} tasks across {} threads",
-        cluster_map.len(),
-        threads
-    );
-
-    let (tx, rx) = mpsc::channel();
-
-    let mut pool = Pool::new(threads as u32);
-    let zim_file_arc = Arc::new(&zim_file);
-
-    pool.scoped(|scope| {
-        for (cid, entries) in cluster_map {
-            let zim_file_arc = zim_file_arc.clone();
-            let tx = tx.clone();
-            scope.execute(move || {
-                let mut cluster = if cid == link_entry {
-                    None
-                } else {
-                    Some(zim_file_arc.get_cluster(cid).unwrap())
-                };
-                for entry in entries {
-                    process_target(
-                        zim_file_arc.clone(),
-                        &mut cluster,
-                        root_output,
-                        &entry,
-                        skip_link,
-                        &tx,
-                    );
+        pb.set_message("Generating links");
+        entries
+            .par_iter()
+            .filter(|entry| {
+                if let Some(Target::Redirect(_)) = entry.target.as_ref() {
+                    return true;
                 }
+                false
+            })
+            .for_each(|entry| {
+                process_link(&zim_file, &root_output, entry, skip_link, flatten_link, &pb);
             });
-        }
-    });
-
-    for (src, dst) in rx.try_iter() {
-        make_link(src, dst, flatten_link)
     }
 
-    println!("  Extraction done in {}ms", sw.elapsed_ms());
-
-    if let Some(main_page_idx) = zim_file.header.main_page {
-        let page = zim_file
-            .get_by_url_index(main_page_idx)
-            .expect("failed to get main page");
-        println!("  Main page is {}", page.url);
-    }
+    pb.finish_with_message(&format!(
+        "Extraction done in {}s",
+        sw.elapsed_ms() as f64 / 1000.
+    ));
 }
 
-fn safe_write(path: &Path, data: &[u8], count: usize) {
+fn safe_write<T: AsRef<[u8]>>(path: &Path, data: T, count: usize) {
     let display = path.display();
     let contain_path = path.parent().unwrap();
 
@@ -140,19 +124,24 @@ fn safe_write(path: &Path, data: &[u8], count: usize) {
 
     match File::create(&path) {
         Err(why) => {
-            eprintln!("couldn't create {}: {}", display, why.description());
-
             if count < 3 {
                 safe_write(path, data, count + 1);
             } else {
-                panic!("failed retry: couldn't create {}: {:?}", display, why,);
+                eprintln!(
+                    "skipping: failed retry: couldn't create {}: {:?}",
+                    display, why
+                );
             }
         }
         Ok(file) => {
             let mut writer = BufWriter::new(&file);
 
-            if let Err(why) = writer.write_all(data) {
-                println!("couldn't write to {}: {}", display, why.description());
+            if let Err(why) = writer.write_all(data.as_ref()) {
+                eprintln!(
+                    "skipping: couldn't write to {}: {}",
+                    display,
+                    why.description()
+                );
             }
         }
     }
@@ -164,67 +153,111 @@ fn ensure_dir(path: &Path) {
         return;
     }
 
-    match std::fs::create_dir_all(path) {
-        Err(e) => {
-            use std::io::ErrorKind::*;
-
-            match e.kind() {
-                // do not panic if it already exists, that's fine, we just want to make
-                // sure we have it before moving on
-                AlreadyExists => {}
-                _ => {
-                    panic!("failed to create {}: {}", path.display(), e.description());
-                }
-            }
-        }
-        _ => {}
-    }
+    std::fs::create_dir_all(path)
+        .unwrap_or_else(|e| ignore_exists_err(e, &format!("create: {}", path.display())));
 }
 
-fn process_target(
-    zim_file: Arc<&Zim>,
-    cluster: &mut Option<Cluster>,
+fn process_file<'a>(
+    root_output: &Path,
+    cluster_map: &'a HashMap<u32, Cluster<'a>>,
+    entry: &DirectoryEntry,
+    pb: &ProgressBar,
+) {
+    let dst = make_path(root_output, entry.namespace, &entry.url, &entry.mime_type);
+    match entry.target.as_ref() {
+        Some(Target::Cluster(cluster_index, blob_idx)) => {
+            let cluster = cluster_map.get(cluster_index).expect("missing cluster");
+
+            match cluster.get_blob(*blob_idx) {
+                Ok(blob) => {
+                    safe_write(&dst, blob, 1);
+                }
+                Err(err) => {
+                    eprintln!("skipping invalid blob: {}: {}", dst.display(), err);
+                }
+            }
+            pb.inc(1);
+        }
+        Some(_) => unreachable!("filtered out earlier"),
+        None => {
+            eprintln!("skipping missing target {} {:?}", dst.display(), entry);
+        }
+    }
+}
+fn process_link(
+    zim_file: &Zim,
     root_output: &Path,
     entry: &DirectoryEntry,
     skip_link: bool,
-    tx: &mpsc::Sender<(PathBuf, PathBuf)>,
+    flatten_link: bool,
+    pb: &ProgressBar,
 ) {
     let dst = make_path(root_output, entry.namespace, &entry.url, &entry.mime_type);
 
     if entry.target.is_none() {
-        println!("skipping missing target {:?} {:?}", dst, entry);
+        eprintln!("skipping missing target {:?} {:?}", dst, entry);
         return;
     }
 
-    match entry.target.as_ref().unwrap() {
-        &Target::Cluster(_, bid) => {
-            let cluster = cluster.as_mut().unwrap();
-            let blob = cluster.get_blob(bid).expect("failed to get blob");
-
-            safe_write(&dst, blob, 1);
-        }
-        &Target::Redirect(redir) => {
+    match entry.target.as_ref() {
+        Some(Target::Redirect(redir)) => {
             if !skip_link && !dst.exists() {
+                pb.inc_length(1);
+
                 let entry = {
                     zim_file
-                        .get_by_url_index(redir)
+                        .get_by_url_index(*redir)
                         .expect("failed to get_by_url_index")
                 };
                 let src = make_path(root_output, entry.namespace, &entry.url, &entry.mime_type);
-                tx.send((src, dst)).expect("couldn't send");
+                make_link(src, dst, flatten_link);
+                pb.inc(1);
             }
         }
+        _ => panic!("must be filtered before"),
     }
 }
 
-fn make_link(src: PathBuf, dst: PathBuf, flatten_link: bool) {
+fn make_link(src: PathBuf, mut dst: PathBuf, flatten_link: bool) {
     if !src.exists() {
-        println!("Link source doesn't exist: {}", src.display());
+        eprintln!("Warning: link source doesn't exist: {}", src.display());
     } else if !dst.exists() {
+        let contain_path = dst.parent().unwrap();
+        ensure_dir(contain_path);
+
+        if let Some(ext) = src.extension() {
+            if dst.extension().is_none() || dst.extension().unwrap() != ext {
+                dst.set_extension(ext);
+            }
+        }
+
         if flatten_link {
-            std::fs::copy(src, dst).expect("failed to copy");
+            std::fs::copy(&src, &dst).unwrap_or_else(|e| {
+                ignore_exists_err(
+                    e,
+                    format!("copy link: {} -> {}", src.display(), dst.display()),
+                );
+                0
+            });
         } else {
-            std::fs::hard_link(src, dst).expect("failed to create link");
+            std::fs::hard_link(&src, &dst).unwrap_or_else(|e| {
+                ignore_exists_err(
+                    e,
+                    format!("create link: {} -> {}", src.display(), dst.display()),
+                );
+            });
+        }
+    }
+}
+fn ignore_exists_err<T: AsRef<str>>(e: std::io::Error, msg: T) {
+    use std::io::ErrorKind::*;
+
+    match e.kind() {
+        // do not panic if it already exists, that's fine, we just want to make
+        // sure we have it before moving on
+        AlreadyExists => {}
+        _ => {
+            eprintln!("skipping: {}: {}", msg.as_ref(), e);
         }
     }
 }
@@ -240,11 +273,29 @@ fn make_path(root: &Path, namespace: Namespace, url: &str, mime_type: &MimeType)
         root.join(&s).join(url)
     };
 
-    if let MimeType::Type(ref typ) = mime_type {
-        if typ == "text/html"
-            && (path.extension().is_none() || path.extension().unwrap().is_empty())
-        {
-            path.set_extension("html");
+    if let MimeType::Type(typ) = mime_type {
+        let extension = match typ.as_str() {
+            "text/html" => Some("html"),
+            "image/jpeg" => Some("jpeg"),
+            "image/png" => Some("png"),
+            "image/gif" => Some("gif"),
+            "image/svg+xml" => Some("svg"),
+            "application/javascript" => Some("js"),
+            "text/css" => Some("css"),
+            "text/plain" => Some("txt"),
+            _ => None,
+        };
+        if let Some(extension) = extension {
+            if path.extension().is_none()
+                || !path
+                    .extension()
+                    .unwrap()
+                    .to_str()
+                    .unwrap_or_default()
+                    .starts_with(extension)
+            {
+                path.set_extension(extension);
+            }
         }
     }
 
