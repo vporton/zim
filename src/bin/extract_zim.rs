@@ -276,7 +276,7 @@ fn make_path(root: &Path, namespace: Namespace, url: &str, mime_type: &MimeType)
     if let MimeType::Type(typ) = mime_type {
         let extension = match typ.as_str() {
             "text/html" => Some("html"),
-            "image/jpeg" => Some("jpeg"),
+            "image/jpeg" => Some("jpg"),
             "image/png" => Some("png"),
             "image/gif" => Some("gif"),
             "image/svg+xml" => Some("svg"),
